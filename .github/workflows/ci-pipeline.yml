@@ -72,7 +72,7 @@ jobs:
 
     - name: Build Tag and push Docker Image
       env:
-        REGISTRY_PATH: thiagotota.jfrog.io/images-local/githubactions
+        REGISTRY_PATH: thiagotota.jfrog.io/images-local/github-actions
         IMAGE_NAME: dotnet-webapi
         VERSION_TAG: ${{ github.run_number }}
       run: |
