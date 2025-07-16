@@ -78,11 +78,10 @@ jobs:
       run: |
         # Define image names with tags
         VERSIONED_IMAGE=${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}
-        LATEST_IMAGE=${REGISTRY_PATH}/${IMAGE_NAME}:latest
         
         # Build the Docker image with Alpine Linux base
         echo "Building Docker image..."
-        if ! jf docker build -f ./Dotnet.Webapi/Dockerfile -t ${VERSIONED_IMAGE} -t ${LATEST_IMAGE} .; then
+        if ! jf docker build -f ./Dotnet.Webapi/Dockerfile -t ${VERSIONED_IMAGE} .; then
           echo "❌ Docker build failed"
           exit 1
         fi
@@ -99,16 +98,9 @@ jobs:
           exit 1
         fi
         
-        echo "Pushing latest tag to JFrog Artifactory..."
-        if ! jf docker push ${LATEST_IMAGE}; then
-          echo "❌ Failed to push latest image"
-          exit 1
-        fi
-        
         # Output the pushed image details
         echo "✅ Successfully pushed images:"
         echo " - ${VERSIONED_IMAGE}"
-        echo " - ${LATEST_IMAGE}"
           
     - name: Publish Build info With JFrog CLI
       env:
