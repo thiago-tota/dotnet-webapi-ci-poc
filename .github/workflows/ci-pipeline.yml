@@ -7,6 +7,12 @@ on:
     branches: [ '*' ]  # Trigger on PRs to all branches
   workflow_dispatch:  # Allows manual triggering
 
+# Required permissions for security scanning
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
 env:
   DOTNET_VERSION: '8.0.x'  # Matches your .NET 8 project
   IMAGE_NAME: dotnet-webapi  # Name for the container image
