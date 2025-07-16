@@ -71,7 +71,7 @@ jobs:
       env:
         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
       with:
-        args: --severity-threshold=high --fail-on=all
+        args: --file=Dotnet.Webapi/Dotnet.Webapi.csproj --severity-threshold=high --sarif-file-output=snyk.sarif
         
     - name: Upload Snyk results to GitHub Code Scanning
       uses: github/codeql-action/upload-sarif@v3
