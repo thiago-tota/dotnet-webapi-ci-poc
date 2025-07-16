@@ -69,12 +69,19 @@ jobs:
     - name: Build project for Snyk analysis
       run: dotnet build --configuration Release --no-restore
       
+    - name: Setup Snyk CLI
+      uses: snyk/actions/setup@master
+      
     - name: Run Snyk to check for vulnerabilities
-      uses: snyk/actions/dotnet@master
       env:
         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-      with:
-        args: --severity-threshold=high --sarif-file-output=snyk.sarif
+      run: |
+        # Debug: List files to understand the structure
+        echo "Current directory structure:"
+        find . -name "*.csproj" -o -name "*.sln" | head -10
+        
+        # Test the main web API project with explicit package manager
+        snyk test --package-manager=nuget --file=Dotnet.Webapi/Dotnet.Webapi.csproj --severity-threshold=high --sarif-file-output=snyk.sarif
         
     - name: Upload Snyk results to GitHub Code Scanning
       uses: github/codeql-action/upload-sarif@v3
