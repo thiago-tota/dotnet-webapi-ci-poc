@@ -92,8 +92,65 @@ jobs:
       with:
         sarif_file: snyk.sarif
 
+  sonarqube-scan:
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        # Shallow clones should be disabled for better analysis
+        fetch-depth: 0
+      
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+        
+    - name: Setup Java (required for SonarQube Scanner)
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+        
+    - name: Install SonarQube Scanner for .NET
+      run: |
+        dotnet tool install --global dotnet-sonarscanner
+        
+    - name: Restore dependencies
+      run: dotnet restore
+      
+    - name: Begin SonarQube analysis
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      run: |
+        dotnet sonarscanner begin \
+          /k:"dotnet-webapi-ci-poc" \
+          /o:"thiagotota" \
+          /d:sonar.token="${SONAR_TOKEN}" \
+          /d:sonar.host.url="https://sonarcloud.io" \
+          /d:sonar.cs.dotcover.reportsPaths="**/TestResults/**/coverage.cobertura.xml" \
+          /d:sonar.cs.vstest.reportsPaths="**/TestResults/*.trx"
+        
+    - name: Build and Test with Coverage
+      run: |
+        dotnet build --configuration Release --no-restore
+        dotnet test Dotnet.Webapi.Tests/Dotnet.Webapi.Tests.csproj \
+          --configuration Release \
+          --no-build \
+          --logger trx \
+          --results-directory TestResults \
+          --collect:"XPlat Code Coverage" \
+          --settings coverlet.runsettings
+        
+    - name: End SonarQube analysis
+      env:
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      run: dotnet sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
+
   build-and-push-image-jfrog:
-    needs: [build-and-test, snyk-security-scan]
+    needs: [build-and-test, snyk-security-scan, sonarqube-scan]
     runs-on: ubuntu-latest
     # Only run on main/master branch or manual trigger
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
