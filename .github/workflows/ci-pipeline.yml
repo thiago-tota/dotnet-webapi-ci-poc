@@ -17,6 +17,9 @@ permissions:
 env:
   DOTNET_VERSION: '8.0.x'  # Matches your .NET 8 project
   IMAGE_NAME: dotnet-webapi  # Name for the container image
+  # SonarCloud configuration - Update these values for your account
+  SONAR_PROJECT_KEY: 'thiago-tota_gha-dotnet-webapi'
+  SONAR_ORGANIZATION: 'thiago-tota'
 
 jobs:
   build-and-test:
@@ -125,13 +128,18 @@ jobs:
       env:
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       run: |
+        # Check if running on SonarCloud or self-hosted
+        echo "Starting SonarQube analysis..."
+        echo "Project Key: ${{ env.SONAR_PROJECT_KEY }}"
+        
+        # Try without organization first (for troubleshooting)
         dotnet sonarscanner begin \
-          /k:"dotnet-webapi-ci-poc" \
-          /o:"thiagotota" \
+          /k:"${{ env.SONAR_PROJECT_KEY }}" \
           /d:sonar.token="${SONAR_TOKEN}" \
           /d:sonar.host.url="https://sonarcloud.io" \
           /d:sonar.cs.dotcover.reportsPaths="**/TestResults/**/coverage.cobertura.xml" \
-          /d:sonar.cs.vstest.reportsPaths="**/TestResults/*.trx"
+          /d:sonar.cs.vstest.reportsPaths="**/TestResults/*.trx" \
+          /d:sonar.scanner.skipJreProvisioning=true
         
     - name: Build and Test with Coverage
       run: |
