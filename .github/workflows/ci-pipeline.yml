@@ -158,7 +158,7 @@ jobs:
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       run: dotnet sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
 
-  build-docker-image:
+  build-and-scan-docker-image:
     needs: [build-and-test, snyk-security-scan, sonarqube-scan]
     runs-on: ubuntu-latest
     
@@ -218,41 +218,24 @@ jobs:
         echo "✅ Successfully built image:"
         echo " - ${VERSIONED_IMAGE}"
 
-  snyk-docker-scan:
-    needs: build-docker-image
-    runs-on: ubuntu-latest
-    
-    steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
-        
-    - name: Setup JFrog CLI via OIDC
-      uses: jfrog/setup-jfrog-cli@v4
-      env:
-        JF_URL: ${{ vars.JF_URL }}
-      with:
-        oidc-provider-name: gha-jfrog 
-        oidc-audience: hkjc_audience
-        
-    - name: Setup Snyk CLI
+    - name: Setup Snyk CLI for Docker Scanning
       uses: snyk/actions/setup@master
       
-    - name: Login to JFrog Docker Registry
-      run: |
-        echo "Logging into JFrog Docker registry..."
-        jf docker-login hkjctest.jfrog.io
-        
-    - name: Pull Docker Image for Scanning
-      run: |
-        echo "Pulling image for security scan..."
-        docker pull ${{ needs.build-docker-image.outputs.image-name }}
-        
     - name: Run Snyk Docker Security Scan
       env:
         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
       run: |
+        # Get the image name that was just built
+        if [[ "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "master" ]]; then
+          VERSIONED_IMAGE=${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}
+        else
+          SAFE_BRANCH_NAME=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
+          VERSIONED_IMAGE=${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}-${SAFE_BRANCH_NAME}
+        fi
+        
         echo "Scanning Docker image for vulnerabilities..."
-        snyk container test ${{ needs.build-docker-image.outputs.image-name }} \
+        echo "Image: $VERSIONED_IMAGE"
+        snyk container test $VERSIONED_IMAGE \
           --severity-threshold=high \
           --sarif-file-output=snyk-docker.sarif \
           --file=./Dotnet.Webapi/Dockerfile
@@ -265,7 +248,7 @@ jobs:
         category: snyk-docker
 
   push-docker-image-jfrog:
-    needs: [build-docker-image, snyk-docker-scan]
+    needs: build-and-scan-docker-image
     runs-on: ubuntu-latest
     # Only push to registry on main/master branch or manual trigger
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
@@ -289,7 +272,7 @@ jobs:
     - name: Push Docker Image to JFrog
       run: |
         # Get the image name from the build job
-        VERSIONED_IMAGE="${{ needs.build-docker-image.outputs.image-name }}"
+        VERSIONED_IMAGE="${{ needs.build-and-scan-docker-image.outputs.image-name }}"
         
         # Push the Docker image to JFrog Artifactory
         echo "Pushing image to JFrog Artifactory..."
