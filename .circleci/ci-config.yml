@@ -176,23 +176,28 @@ jobs:
               --collect:"XPlat Code Coverage" \
               --settings coverlet.runsettings
 
-      # Use SonarCloud orb with optimized configuration
+      # Use SonarCloud orb with correct parameters
       - sonarcloud/scan:
           sonar_token_variable_name: SONAR_TOKEN
           cache_version: 1
-          scanner_version: latest
-          sonar_scanner_opts: >-
-            -Dsonar.projectKey=${SONAR_PROJECT_KEY}
-            -Dsonar.organization=${SONAR_ORGANIZATION}
-            -Dsonar.sources=Dotnet.Webapi
-            -Dsonar.tests=Dotnet.Webapi.Tests
-            -Dsonar.cs.dotcover.reportsPaths=**/TestResults/**/coverage.cobertura.xml
-            -Dsonar.cs.vstest.reportsPaths=**/TestResults/*.trx
-            -Dsonar.host.url=https://sonarcloud.io
-            -Dsonar.branch.name=${CIRCLE_BRANCH}
-            -Dsonar.pullrequest.key=${CIRCLE_PR_NUMBER}
-            -Dsonar.pullrequest.branch=${CIRCLE_BRANCH}
-            -Dsonar.pullrequest.base=${CIRCLE_PR_REPONAME}
+
+      - run:
+          name: Create SonarCloud Configuration  
+          command: |
+            echo "sonar.projectKey=${SONAR_PROJECT_KEY}" > sonar-project.properties
+            echo "sonar.organization=${SONAR_ORGANIZATION}" >> sonar-project.properties
+            echo "sonar.host.url=https://sonarcloud.io" >> sonar-project.properties
+            echo "sonar.sources=Dotnet.Webapi" >> sonar-project.properties
+            echo "sonar.tests=Dotnet.Webapi.Tests" >> sonar-project.properties
+            echo "sonar.cs.dotcover.reportsPaths=**/TestResults/**/coverage.cobertura.xml" >> sonar-project.properties
+            echo "sonar.cs.vstest.reportsPaths=**/TestResults/*.trx" >> sonar-project.properties
+            echo "sonar.branch.name=${CIRCLE_BRANCH}" >> sonar-project.properties
+            if [ -n "${CIRCLE_PR_NUMBER}" ]; then
+              echo "sonar.pullrequest.key=${CIRCLE_PR_NUMBER}" >> sonar-project.properties
+              echo "sonar.pullrequest.branch=${CIRCLE_BRANCH}" >> sonar-project.properties
+              echo "sonar.pullrequest.base=main" >> sonar-project.properties
+            fi
+            cat sonar-project.properties
 
       - run:
           name: Create SonarQube Summary
