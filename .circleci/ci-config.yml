@@ -66,6 +66,7 @@ jobs:
       - run:
           name: Run Unit Tests
           command: |
+            mkdir -p ${TEST_RESULTS_DIR}
             dotnet test ${UNIT_TEST_PROJECT_NAME}/${UNIT_TEST_PROJECT_NAME}.csproj \
               --configuration Release \
               --no-build \
