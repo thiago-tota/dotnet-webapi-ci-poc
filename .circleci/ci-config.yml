@@ -470,10 +470,71 @@ jobs:
               echo "Token preview: ${CIRCLE_OIDC_TOKEN:0:20}..."
               
               # Try to decode JWT header to see issuer info (for debugging)
-              echo "=== JWT Token Info ==="
-              echo "${CIRCLE_OIDC_TOKEN}" | cut -d. -f1 | base64 -d 2>/dev/null | jq . || echo "Could not decode JWT header"
-              echo "${CIRCLE_OIDC_TOKEN}" | cut -d. -f2 | base64 -d 2>/dev/null | jq . || echo "Could not decode JWT payload"
-              echo "====================="
+              echo "=== JWT Token Analysis ==="
+              
+              # Decode header
+              HEADER=$(echo "${CIRCLE_OIDC_TOKEN}" | cut -d. -f1 | base64 -d 2>/dev/null || echo "{}")
+              echo "JWT Header:"
+              echo "${HEADER}" | jq . 2>/dev/null || echo "${HEADER}"
+              
+              # Decode payload
+              PAYLOAD=$(echo "${CIRCLE_OIDC_TOKEN}" | cut -d. -f2 | base64 -d 2>/dev/null || echo "{}")
+              echo "JWT Payload:"
+              echo "${PAYLOAD}" | jq . 2>/dev/null || echo "${PAYLOAD}"
+              
+              # Extract key fields for JFrog OIDC configuration
+              ISS=$(echo "${PAYLOAD}" | jq -r '.iss // "unknown"' 2>/dev/null || echo "unknown")
+              AUD=$(echo "${PAYLOAD}" | jq -r '.aud // "unknown"' 2>/dev/null || echo "unknown")
+              SUB=$(echo "${PAYLOAD}" | jq -r '.sub // "unknown"' 2>/dev/null || echo "unknown")
+              JTI=$(echo "${PAYLOAD}" | jq -r '.jti // "unknown"' 2>/dev/null || echo "unknown")
+              
+              echo ""
+              echo "🔑 KEY OIDC CONFIGURATION VALUES:"
+              echo "   Issuer (iss): ${ISS}"
+              echo "   Audience (aud): ${AUD}"
+              echo "   Subject (sub): ${SUB}"
+              echo "   JWT ID (jti): ${JTI}"
+              echo ""
+              echo "🔧 JFROG OIDC CONFIGURATION REQUIREMENTS:"
+              echo "   1. Provider URL/Issuer: ${ISS}"
+              echo "   2. Audience: ${AUD}"
+              echo "   3. Claims mapping should include:"
+              echo "      - Token ID: jti (value: ${JTI})"
+              echo "      - Subject: sub (value: ${SUB})"
+              echo ""
+              echo "🚨 SIGNATURE VERIFICATION TROUBLESHOOTING:"
+              echo "   Based on JFrog logs showing 'signature verification failed':"
+              echo "   1. Verify JFrog can access CircleCI's public keys at: ${ISS}/.well-known/openid_configuration"
+              echo "   2. Check that the 'Provider URL' in JFrog OIDC config exactly matches: ${ISS}"
+              echo "   3. Ensure 'Audience' in JFrog OIDC config exactly matches: ${AUD}"
+              echo "   4. Verify network connectivity from JFrog to CircleCI OIDC endpoints"
+              echo "=========================="
+              
+              # Test CircleCI OIDC discovery endpoint
+              echo ""
+              echo "🔍 Testing CircleCI OIDC Discovery Endpoint:"
+              echo "   Endpoint: ${ISS}/.well-known/openid_configuration"
+              if curl -s "${ISS}/.well-known/openid_configuration" | jq . 2>/dev/null; then
+                echo "✅ CircleCI OIDC discovery endpoint is accessible"
+                
+                # Get the JWKS URI
+                JWKS_URI=$(curl -s "${ISS}/.well-known/openid_configuration" | jq -r '.jwks_uri // "unknown"' 2>/dev/null)
+                echo "   JWKS URI: ${JWKS_URI}"
+                
+                if [ "${JWKS_URI}" != "unknown" ] && [ -n "${JWKS_URI}" ]; then
+                  echo "   Testing JWKS endpoint:"
+                  if curl -s "${JWKS_URI}" | jq . 2>/dev/null; then
+                    echo "✅ CircleCI JWKS endpoint is accessible"
+                    echo "   ⚠️  JFrog must be able to access both URLs above for signature verification"
+                  else
+                    echo "❌ CircleCI JWKS endpoint is not accessible"
+                  fi
+                fi
+              else
+                echo "❌ CircleCI OIDC discovery endpoint is not accessible"
+                echo "   This could be a network connectivity issue"
+              fi
+              echo ""
               
               echo "Attempting OIDC authentication..."
               # Configure with OIDC token
@@ -481,10 +542,24 @@ jobs:
                 echo "✅ JFrog CLI configured successfully with OIDC"
               else
                 echo "❌ Failed to configure JFrog CLI with OIDC token"
-                echo "This might mean:"
-                echo "1. OIDC integration is not set up in JFrog"
-                echo "2. OIDC integration configuration is incorrect"
-                echo "3. CircleCI project is not authorized"
+                echo ""
+                echo "🔍 DEBUGGING SIGNATURE VERIFICATION FAILURE:"
+                echo "   The JFrog logs show 'signature verification failed' which means:"
+                echo "   1. ❌ JFrog cannot verify the JWT signature with its configured public key"
+                echo "   2. ❌ There's a mismatch between CircleCI's signing key and JFrog's verification key"
+                echo ""
+                echo "🛠️  TO FIX THE SIGNATURE VERIFICATION:"
+                echo "   1. In JFrog OIDC Integration settings, verify the 'Provider URL' is: ${ISS}"
+                echo "   2. Test JFrog's access to CircleCI's OIDC discovery endpoint:"
+                echo "      curl ${ISS}/.well-known/openid_configuration"
+                echo "   3. Verify the 'jwks_uri' in the discovery document is accessible from JFrog"
+                echo "   4. Check that 'Audience' in JFrog exactly matches: ${AUD}"
+                echo "   5. Ensure no firewall/proxy is blocking JFrog -> CircleCI OIDC endpoints"
+                echo ""
+                echo "🔄 ALTERNATIVE DEBUGGING:"
+                echo "   - Try recreating the OIDC integration in JFrog from scratch"
+                echo "   - Verify CircleCI project settings allow OIDC token generation"
+                echo "   - Check if multiple OIDC integrations exist and conflict"
                 exit 1
               fi
               
