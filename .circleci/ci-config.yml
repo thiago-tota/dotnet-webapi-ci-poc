@@ -483,10 +483,10 @@ jobs:
               echo "${PAYLOAD}" | jq . 2>/dev/null || echo "${PAYLOAD}"
               
               # Extract key fields for JFrog OIDC configuration
-              ISS=$(echo "${PAYLOAD}" | jq -r '.iss // "unknown"' 2>/dev/null || echo "unknown")
-              AUD=$(echo "${PAYLOAD}" | jq -r '.aud // "unknown"' 2>/dev/null || echo "unknown")
-              SUB=$(echo "${PAYLOAD}" | jq -r '.sub // "unknown"' 2>/dev/null || echo "unknown")
-              JTI=$(echo "${PAYLOAD}" | jq -r '.jti // "unknown"' 2>/dev/null || echo "unknown")
+              ISS=$(echo "${PAYLOAD}" | jq -r '.iss // "unknown"' 2>/dev/null)
+              AUD=$(echo "${PAYLOAD}" | jq -r '.aud // "unknown"' 2>/dev/null)
+              SUB=$(echo "${PAYLOAD}" | jq -r '.sub // "unknown"' 2>/dev/null)
+              JTI=$(echo "${PAYLOAD}" | jq -r '.jti // "unknown"' 2>/dev/null)
               
               echo ""
               echo "🔑 KEY OIDC CONFIGURATION VALUES:"
@@ -513,12 +513,15 @@ jobs:
               # Test CircleCI OIDC discovery endpoint
               echo ""
               echo "🔍 Testing CircleCI OIDC Discovery Endpoint:"
-              echo "   Endpoint: ${ISS}/.well-known/openid_configuration"
-              if curl -s "${ISS}/.well-known/openid_configuration" | jq . 2>/dev/null; then
+              DISCOVERY_URL="${ISS}/.well-known/openid_configuration"
+              echo "   Primary endpoint: ${DISCOVERY_URL}"
+              
+              # Test the standard OIDC discovery endpoint
+              if curl -s "${DISCOVERY_URL}" 2>/dev/null | jq . 2>/dev/null; then
                 echo "✅ CircleCI OIDC discovery endpoint is accessible"
                 
                 # Get the JWKS URI
-                JWKS_URI=$(curl -s "${ISS}/.well-known/openid_configuration" | jq -r '.jwks_uri // "unknown"' 2>/dev/null)
+                JWKS_URI=$(curl -s "${DISCOVERY_URL}" | jq -r '.jwks_uri // "unknown"' 2>/dev/null)
                 echo "   JWKS URI: ${JWKS_URI}"
                 
                 if [ "${JWKS_URI}" != "unknown" ] && [ -n "${JWKS_URI}" ]; then
@@ -531,8 +534,35 @@ jobs:
                   fi
                 fi
               else
-                echo "❌ CircleCI OIDC discovery endpoint is not accessible"
-                echo "   This could be a network connectivity issue"
+                echo "❌ Primary OIDC discovery endpoint failed"
+                
+                # Try alternative OIDC discovery endpoints
+                echo "   Trying alternative CircleCI OIDC endpoints..."
+                
+                # Try the root CircleCI OIDC endpoint
+                ALT_DISCOVERY_1="https://oidc.circleci.com/.well-known/openid_configuration"
+                echo "   Alternative 1: ${ALT_DISCOVERY_1}"
+                if curl -s "${ALT_DISCOVERY_1}" 2>/dev/null | jq . 2>/dev/null; then
+                  echo "✅ Alternative CircleCI OIDC discovery endpoint found!"
+                  curl -s "${ALT_DISCOVERY_1}" | jq .
+                else
+                  echo "❌ Alternative 1 failed"
+                fi
+                
+                # Try without org-specific path
+                ALT_DISCOVERY_2="https://oidc.circleci.com/org/${CIRCLE_ORGANIZATION_ID}/.well-known/openid_configuration"
+                echo "   Alternative 2: ${ALT_DISCOVERY_2}"
+                if curl -s "${ALT_DISCOVERY_2}" 2>/dev/null | jq . 2>/dev/null; then
+                  echo "✅ Alternative CircleCI OIDC discovery endpoint found!"
+                  curl -s "${ALT_DISCOVERY_2}" | jq .
+                else
+                  echo "❌ Alternative 2 failed"
+                fi
+                
+                # Show what we get from the base URL
+                echo "   Testing base issuer URL response:"
+                echo "   ${ISS}"
+                curl -s "${ISS}" || echo "Base URL not accessible"
               fi
               echo ""
               
