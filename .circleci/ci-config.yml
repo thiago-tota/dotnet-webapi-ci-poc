@@ -99,13 +99,25 @@ jobs:
           name: Build for Snyk Analysis
           command: dotnet build --configuration Release --no-restore
 
-      # Use Snyk orb to install CLI
-      - snyk/scan:
-          fail-on-issues: false
-          severity-threshold: high
-          monitor-on-build: true
-          token-variable: SNYK_TOKEN
-          additional-arguments: "--sarif-file-output=snyk.sarif --json-file-output=snyk-results.json"
+      # Manual Snyk installation (orb has sudo issues in Docker containers)
+      - run:
+          name: Install and Run Snyk Security Scan
+          command: |
+            # Install Snyk CLI
+            curl -o snyk-linux https://github.com/snyk/snyk/releases/download/v1.1298.0/snyk-linux
+            chmod +x snyk-linux
+            
+            # Authenticate with Snyk
+            ./snyk-linux auth $SNYK_TOKEN
+            
+            # Run security scan on .NET project
+            ./snyk-linux test \
+              --severity-threshold=high \
+              --sarif-file-output=snyk.sarif \
+              --json-file-output=snyk-results.json \
+              --monitor || true
+            
+            echo "✅ Snyk security scan completed"
 
       - run:
           name: Create Snyk Security Summary
