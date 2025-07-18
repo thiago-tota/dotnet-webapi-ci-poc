@@ -9,14 +9,6 @@ environment: &default_environment
   DOTNET_VERSION: "8.0.x"
   IMAGE_NAME: "dotnet-webapi"
   REGISTRY_PATH: "hkjctest.jfrog.io/alley-oop-container/circleci"
-  JFROG_REPOSITORY: "alley-oop-container/circleci"
-  TEST_RESULTS_DIR: "TestResults"
-  APP_NAME: "Dotnet.Webapi"
-  UNIT_TEST_PROJECT_NAME: "Dotnet.Webapi.Tests"
-  SNYK_CLI_DOWNLOAD_URL: "https://github.com/snyk/snyk/releases/download/latest/snyk-linux"
-  SONAR_HOST_URL: "https://sonarcloud.io"
-  SONAR_PROJECT_URL: "https://sonarcloud.io/project/overview?id=thiago-tota_gha-dotnet-webapi"
-  GIT_REPOSITORY_URL: "https://github.com/thiago-tota/dotnet-webapi-ci-poc"
   SONAR_PROJECT_KEY: "thiago-tota_gha-dotnet-webapi"
   SONAR_ORGANIZATION: "thiago-tota"
 
@@ -66,27 +58,26 @@ jobs:
       - run:
           name: Run Unit Tests
           command: |
-            mkdir -p ${TEST_RESULTS_DIR}
-            dotnet test ${UNIT_TEST_PROJECT_NAME}/${UNIT_TEST_PROJECT_NAME}.csproj \
+            dotnet test Dotnet.Webapi.Tests/Dotnet.Webapi.Tests.csproj \
               --configuration Release \
               --no-build \
               --verbosity normal \
               --logger trx \
-              --results-directory ${TEST_RESULTS_DIR}
+              --results-directory TestResults
 
       - store_test_results:
-          path: ${TEST_RESULTS_DIR}
+          path: TestResults
 
       - store_artifacts:
-          path: ${TEST_RESULTS_DIR}
+          path: TestResults
           destination: test-results
 
       - persist_to_workspace:
           root: .
           paths:
-            - ${APP_NAME}/bin/Release/net8.0
-            - ${APP_NAME}/Dockerfile
-            - ${TEST_RESULTS_DIR}
+            - Dotnet.Webapi/bin/Release/net8.0
+            - Dotnet.Webapi/Dockerfile
+            - TestResults
 
   # ============================================================================
   # Snyk Security Scan Job - Using Snyk Orb
@@ -112,7 +103,7 @@ jobs:
           name: Install and Run Snyk Security Scan
           command: |
             # Install Snyk CLI
-            curl -o snyk-linux ${SNYK_CLI_DOWNLOAD_URL}
+            curl -o snyk-linux https://github.com/snyk/snyk/releases/download/v1.1298.0/snyk-linux
             chmod +x snyk-linux
             
             # Authenticate with Snyk
@@ -188,11 +179,11 @@ jobs:
           name: Build and Test with Coverage
           command: |
             dotnet build --configuration Release --no-restore
-            dotnet test ${UNIT_TEST_PROJECT_NAME}/${UNIT_TEST_PROJECT_NAME}.csproj \
+            dotnet test Dotnet.Webapi.Tests/Dotnet.Webapi.Tests.csproj \
               --configuration Release \
               --no-build \
               --logger trx \
-              --results-directory ${TEST_RESULTS_DIR} \
+              --results-directory TestResults \
               --collect:"XPlat Code Coverage" \
               --settings coverlet.runsettings
 
@@ -201,9 +192,9 @@ jobs:
           command: |
             echo "sonar.projectKey=${SONAR_PROJECT_KEY}" > sonar-project.properties
             echo "sonar.organization=${SONAR_ORGANIZATION}" >> sonar-project.properties
-            echo "sonar.host.url=${SONAR_HOST_URL}" >> sonar-project.properties
-            echo "sonar.sources=${APP_NAME}" >> sonar-project.properties
-            echo "sonar.tests=${UNIT_TEST_PROJECT_NAME}" >> sonar-project.properties
+            echo "sonar.host.url=https://sonarcloud.io" >> sonar-project.properties
+            echo "sonar.sources=Dotnet.Webapi" >> sonar-project.properties
+            echo "sonar.tests=Dotnet.Webapi.Tests" >> sonar-project.properties
             echo "sonar.cs.dotcover.reportsPaths=**/TestResults/**/coverage.cobertura.xml" >> sonar-project.properties
             echo "sonar.cs.vstest.reportsPaths=**/TestResults/*.trx" >> sonar-project.properties
             echo "sonar.branch.name=${CIRCLE_BRANCH}" >> sonar-project.properties
@@ -231,7 +222,7 @@ jobs:
             echo "- **Commit**: ${CIRCLE_SHA1}" >> sonarqube-summary.md
             echo "" >> sonarqube-summary.md
             echo "### 🔗 View Results" >> sonarqube-summary.md
-            echo "📈 [View detailed analysis on SonarCloud](${SONAR_PROJECT_URL})" >> sonarqube-summary.md
+            echo "📈 [View detailed analysis on SonarCloud](https://sonarcloud.io/project/overview?id=${SONAR_PROJECT_KEY})" >> sonarqube-summary.md
             echo "" >> sonarqube-summary.md
             echo "### Analysis Coverage" >> sonarqube-summary.md
             echo "- ✅ Code Quality Gates" >> sonarqube-summary.md
@@ -302,13 +293,13 @@ jobs:
       
       # Use Docker orb to build image with optimized caching and multi-tag support
       - docker/build:
-          dockerfile: ./${APP_NAME}/Dockerfile
+          dockerfile: ./Dotnet.Webapi/Dockerfile
           image: ${REGISTRY_PATH}/${IMAGE_NAME}
           tag: ${DOCKER_TAGS}
           cache_from: ${REGISTRY_PATH}/${IMAGE_NAME}:latest
           extra_build_args: |
             --build-arg BUILDKIT_INLINE_CACHE=1
-            --label org.opencontainers.image.source=${GIT_REPOSITORY_URL}
+            --label org.opencontainers.image.source=https://github.com/thiago-tota/dotnet-webapi-ci-poc
             --label org.opencontainers.image.revision=${CIRCLE_SHA1}
             --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
             --label org.opencontainers.image.version=${VERSION_TAG}
@@ -318,7 +309,7 @@ jobs:
           name: Install and Run Snyk Container Scan
           command: |
             # Install Snyk CLI
-            curl -o snyk-linux ${SNYK_CLI_DOWNLOAD_URL}
+            curl -o snyk-linux https://github.com/snyk/snyk/releases/download/v1.1298.0/snyk-linux
             chmod +x snyk-linux
             
             # Authenticate with Snyk
@@ -326,7 +317,7 @@ jobs:
             
             # Run container scan
             ./snyk-linux container test ${VERSIONED_IMAGE} \
-              --file=./${APP_NAME}/Dockerfile \
+              --file=./Dotnet.Webapi/Dockerfile \
               --severity-threshold=high \
               --sarif-file-output=snyk-docker.sarif \
               --json-file-output=snyk-docker-results.json || true
@@ -341,7 +332,7 @@ jobs:
             echo "### Scanned Image" >> docker-security-summary.md
             echo "- **Image**: \`${VERSIONED_IMAGE}\`" >> docker-security-summary.md
             echo "- **Base Image**: .NET 8 Runtime" >> docker-security-summary.md
-            echo "- **Dockerfile**: \`./${APP_NAME}/Dockerfile\`" >> docker-security-summary.md
+            echo "- **Dockerfile**: \`./Dotnet.Webapi/Dockerfile\`" >> docker-security-summary.md
             echo "" >> docker-security-summary.md
             
             if [ -f snyk-docker-results.json ]; then
@@ -451,13 +442,13 @@ jobs:
 
       # Use Docker orb to rebuild image efficiently with same tags
       - docker/build:
-          dockerfile: ./${APP_NAME}/Dockerfile
+          dockerfile: ./Dotnet.Webapi/Dockerfile
           image: ${REGISTRY_PATH}/${IMAGE_NAME}
           tag: ${DOCKER_TAGS}
           cache_from: ${REGISTRY_PATH}/${IMAGE_NAME}:latest
           extra_build_args: |
             --build-arg BUILDKIT_INLINE_CACHE=1
-            --label org.opencontainers.image.source=${GIT_REPOSITORY_URL}
+            --label org.opencontainers.image.source=https://github.com/thiago-tota/dotnet-webapi-ci-poc
             --label org.opencontainers.image.revision=${CIRCLE_SHA1}
             --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
             --label org.opencontainers.image.version=${VERSION_TAG}
@@ -466,14 +457,14 @@ jobs:
           name: Push Docker Image to JFrog
           command: |
             echo "Pushing image to JFrog Artifactory: ${VERSIONED_IMAGE}"
-            jfrog rt docker-push ${VERSIONED_IMAGE} ${JFROG_REPOSITORY}
+            jfrog rt docker-push ${VERSIONED_IMAGE} alley-oop-container/circleci
 
       - run:
           name: Push Latest Tag (Main Branch Only)
           command: |
             if [[ "${PUSH_LATEST}" == "true" ]]; then
               echo "Pushing latest tag: ${LATEST_IMAGE}"
-              jfrog rt docker-push ${LATEST_IMAGE} ${JFROG_REPOSITORY}
+              jfrog rt docker-push ${LATEST_IMAGE} alley-oop-container/circleci
             else
               echo "Skipping latest tag push (not main branch)"
             fi
