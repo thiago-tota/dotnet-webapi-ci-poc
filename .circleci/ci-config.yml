@@ -449,8 +449,19 @@ jobs:
       - jfrog/install
       
       - run:
+          name: Verify JFrog CLI Installation
+          command: |
+            # Ensure JFrog CLI is in PATH
+            export PATH="$PATH:/usr/local/bin"
+            which jf || echo "JFrog CLI not found in PATH"
+            jf --version || echo "JFrog CLI version check failed"
+      
+      - run:
           name: Configure JFrog CLI
           command: |
+            # Ensure JFrog CLI is in PATH
+            export PATH="$PATH:/usr/local/bin"
+            
             # Configure JFrog CLI with OIDC or access token
             if [ -n "${JF_ACCESS_TOKEN}" ]; then
               jf config add --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}" --interactive=false
@@ -462,6 +473,8 @@ jobs:
       - run:
           name: Verify JFrog Connection
           command: |
+            # Ensure JFrog CLI is in PATH
+            export PATH="$PATH:/usr/local/bin"
             echo "Testing JFrog connection..."
             jf rt ping
       
@@ -523,6 +536,9 @@ jobs:
       - run:
           name: Push Docker Image to JFrog
           command: |
+            # Ensure JFrog CLI is in PATH
+            export PATH="$PATH:/usr/local/bin"
+            
             echo "Pushing image to JFrog Artifactory..."
             echo "Branch: ${CIRCLE_BRANCH}"
             echo "Commit: ${SHORT_SHA}"
@@ -577,6 +593,9 @@ jobs:
       - run:
           name: Publish Build Info to JFrog
           command: |
+            # Ensure JFrog CLI is in PATH
+            export PATH="$PATH:/usr/local/bin"
+            
             # Collect environment variables for the build
             jf rt build-collect-env
             # Collect VCS details from git and add them to the build
@@ -634,13 +653,11 @@ workflows:
             branches:
               only: /.*/
       
-      # Stage 4: Deploy to registry (main/master only)
+      # Stage 4: Deploy to registry (all branches for testing)
       - push-docker-image-jfrog:
           context: dotnet-webapi-security
           requires:
             - build-and-scan-docker-image
           filters:
             branches:
-              only:
-                - main
-                - master
+              only: /.*/ 
