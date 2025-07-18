@@ -2,7 +2,6 @@ version: 2.1
 
 # ============================================================================
 # CircleCI Pipeline for .NET Web API
-# Comprehensive CI/CD pipeline with security scanning, code quality, and deployment
 # ============================================================================
 
 # Environment variables
@@ -206,7 +205,7 @@ jobs:
             fi
             cat sonar-project.properties
 
-      # Use SonarCloud orb with correct parameters
+      # Use SonarCloud orb
       - sonarcloud/scan:
           sonar_token_variable_name: SONAR_TOKEN
           cache_version: 1
@@ -551,11 +550,13 @@ workflows:
             branches:
               only: /.*/
 
-      # Deploy to JFrog registry
+      # Deploy to JFrog registry (main branch only)
       - push-docker-image-jfrog:
           context: dotnet-webapi-security
           requires:
             - build-and-scan-docker-image
           filters:
             branches:
-              only: /.*/
+              only:
+                - main
+                - master
