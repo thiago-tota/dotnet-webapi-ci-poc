@@ -190,7 +190,7 @@ jobs:
         echo "Building Docker image..."
         echo "Branch: $BRANCH_NAME"
         echo "Image: $VERSIONED_IMAGE"
-        if ! jf docker build -f ./Dotnet.Webapi/Dockerfile -t ${VERSIONED_IMAGE} .; then
+        if ! docker build -f ./Dotnet.Webapi/Dockerfile -t ${VERSIONED_IMAGE} .; then
           echo "❌ Docker build failed"
           exit 1
         fi
