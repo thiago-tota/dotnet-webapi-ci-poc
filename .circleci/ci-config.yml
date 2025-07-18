@@ -99,10 +99,33 @@ jobs:
           name: Build for Snyk Analysis
           command: dotnet build --configuration Release --no-restore
       
-      - snyk/scan:
-          severity-threshold: high
-          additional-arguments: "--sarif-file-output=snyk.sarif --json-file-output=snyk-results.json"
-          fail-on-issues: false
+      - run:
+          name: Install Snyk CLI
+          command: |
+            # Download and install Snyk CLI manually (no sudo required)
+            curl -Lo /tmp/snyk https://github.com/snyk/cli/releases/latest/download/snyk-linux
+            chmod +x /tmp/snyk
+            echo 'export PATH="/tmp:$PATH"' >> $BASH_ENV
+            
+            # Verify installation
+            /tmp/snyk --version
+      
+      - run:
+          name: Authenticate Snyk
+          command: /tmp/snyk auth $SNYK_TOKEN
+      
+      - run:
+          name: Run Snyk Security Scan
+          command: |
+            echo "Running Snyk security scan..."
+            
+            # Scan for vulnerabilities
+            /tmp/snyk test \
+              --severity-threshold=high \
+              --sarif-file-output=snyk.sarif \
+              --json-file-output=snyk-results.json || true
+            
+            echo "Snyk security scan completed"
       
       - run:
           name: Create Snyk Security Summary
@@ -184,6 +207,8 @@ jobs:
       - sonarcloud/scan:
           sonar_token_variable_name: SONAR_TOKEN
           cache_version: 1
+          project_key: ${SONAR_PROJECT_KEY}
+          organization: ${SONAR_ORGANIZATION}
       
       - run:
           name: Create SonarQube Summary
