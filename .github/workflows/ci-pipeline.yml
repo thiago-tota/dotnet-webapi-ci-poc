@@ -170,19 +170,6 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-        
-    - name: Setup JFrog CLI via OIDC
-      uses: jfrog/setup-jfrog-cli@v4
-      env:
-        JF_URL: ${{ vars.JF_URL }}
-      with:
-        oidc-provider-name: gha-jfrog 
-        oidc-audience: hkjc_audience
-
-    - name: Verify JFrog Connection
-      run: |
-        echo "Testing JFrog connection..."
-        jf rt ping
 
     - name: Build Docker Image
       id: build-info
