@@ -17,6 +17,7 @@ permissions:
 env:
   DOTNET_VERSION: '8.0.x'  # Matches your .NET 8 project
   IMAGE_NAME: dotnet-webapi  # Name for the container image
+  REGISTRY_PATH: hkjctest.jfrog.io/alley-oop-container/github-actions  # JFrog registry path
   # SonarCloud configuration - Update these values for your account
   SONAR_PROJECT_KEY: 'thiago-tota_gha-dotnet-webapi'
   SONAR_ORGANIZATION: 'thiago-tota'
@@ -186,18 +187,16 @@ jobs:
     - name: Build Docker Image
       id: build-info
       env:
-        REGISTRY_PATH: hkjctest.jfrog.io/alley-oop-container/github-actions
-        IMAGE_NAME: dotnet-webapi
         VERSION_TAG: ${{ github.run_number }}
         BRANCH_NAME: ${{ github.ref_name }}
       run: |
         # Create branch-specific tag for non-main branches
         if [[ "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "master" ]]; then
-          VERSIONED_IMAGE=${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}
+          VERSIONED_IMAGE=${{ env.REGISTRY_PATH }}/${{ env.IMAGE_NAME }}:${VERSION_TAG}
         else
           # For feature branches, include branch name in tag
           SAFE_BRANCH_NAME=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
-          VERSIONED_IMAGE=${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}-${SAFE_BRANCH_NAME}
+          VERSIONED_IMAGE=${{ env.REGISTRY_PATH }}/${{ env.IMAGE_NAME }}:${VERSION_TAG}-${SAFE_BRANCH_NAME}
         fi
         
         # Build the Docker image
@@ -224,16 +223,19 @@ jobs:
     - name: Run Snyk Docker Security Scan
       env:
         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        VERSION_TAG: ${{ github.run_number }}
+        BRANCH_NAME: ${{ github.ref_name }}
       run: |
-        # Get the image name that was just built
+        # Get the image name that was just built (same logic as build step)
         if [[ "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "master" ]]; then
-          VERSIONED_IMAGE=${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}
+          VERSIONED_IMAGE=${{ env.REGISTRY_PATH }}/${{ env.IMAGE_NAME }}:${VERSION_TAG}
         else
           SAFE_BRANCH_NAME=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
-          VERSIONED_IMAGE=${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}-${SAFE_BRANCH_NAME}
+          VERSIONED_IMAGE=${{ env.REGISTRY_PATH }}/${{ env.IMAGE_NAME }}:${VERSION_TAG}-${SAFE_BRANCH_NAME}
         fi
         
         echo "Scanning Docker image for vulnerabilities..."
+        echo "Branch: $BRANCH_NAME"
         echo "Image: $VERSIONED_IMAGE"
         snyk container test $VERSIONED_IMAGE \
           --severity-threshold=high \
