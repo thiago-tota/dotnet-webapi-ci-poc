@@ -159,6 +159,13 @@ jobs:
           at: .
       
       - run:
+          name: Install Required Tools
+          command: |
+            # Update package list and install unzip (required by SonarCloud orb)
+            apt-get update
+            apt-get install -y unzip
+      
+      - run:
           name: Restore Dependencies
           command: dotnet restore
       
