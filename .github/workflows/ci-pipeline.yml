@@ -258,10 +258,41 @@ jobs:
         echo "Testing JFrog connection..."
         jf rt ping
 
-    - name: Push Docker Image to JFrog
+    - name: Rebuild Docker Image for Push
+      env:
+        VERSION_TAG: ${{ github.run_number }}
+        BRANCH_NAME: ${{ github.ref_name }}
       run: |
-        # Get the image name from the build job
-        VERSIONED_IMAGE="${{ needs.build-and-scan-docker-image.outputs.image-name }}"
+        # Create the same image name as the build job
+        if [[ "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "master" ]]; then
+          VERSIONED_IMAGE=${{ env.REGISTRY_PATH }}/${{ env.IMAGE_NAME }}:${VERSION_TAG}
+        else
+          # For feature branches, include branch name in tag
+          SAFE_BRANCH_NAME=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
+          VERSIONED_IMAGE=${{ env.REGISTRY_PATH }}/${{ env.IMAGE_NAME }}:${VERSION_TAG}-${SAFE_BRANCH_NAME}
+        fi
+        
+        echo "Rebuilding Docker image for push..."
+        echo "Branch: $BRANCH_NAME"
+        echo "Image: $VERSIONED_IMAGE"
+        if ! docker build -f ./Dotnet.Webapi/Dockerfile -t ${VERSIONED_IMAGE} .; then
+          echo "❌ Docker build failed"
+          exit 1
+        fi
+        echo "✅ Docker image rebuilt successfully"
+
+    - name: Push Docker Image to JFrog
+      env:
+        VERSION_TAG: ${{ github.run_number }}
+        BRANCH_NAME: ${{ github.ref_name }}
+      run: |
+        # Recreate the image name (same logic as rebuild step)
+        if [[ "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "master" ]]; then
+          VERSIONED_IMAGE=${{ env.REGISTRY_PATH }}/${{ env.IMAGE_NAME }}:${VERSION_TAG}
+        else
+          SAFE_BRANCH_NAME=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
+          VERSIONED_IMAGE=${{ env.REGISTRY_PATH }}/${{ env.IMAGE_NAME }}:${VERSION_TAG}-${SAFE_BRANCH_NAME}
+        fi
         
         # Push the Docker image to JFrog Artifactory
         echo "Pushing image to JFrog Artifactory..."
