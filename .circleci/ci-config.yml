@@ -27,7 +27,7 @@ executors:
       - image: mcr.microsoft.com/dotnet/sdk:8.0
     environment:
       <<: *default_environment
-  
+
   ubuntu-docker:
     docker:
       - image: cimg/base:stable
@@ -36,24 +36,26 @@ executors:
 
 # Jobs
 jobs:
-  # Build and Test
+  # ============================================================================
+  # Build and Test Job
+  # ============================================================================
   build-and-test:
     executor: dotnet-executor
     steps:
       - checkout
-      
+
       - run:
           name: Display .NET Version
           command: dotnet --version
-      
+
       - run:
           name: Restore Dependencies
           command: dotnet restore
-      
+
       - run:
           name: Build Solution
           command: dotnet build --configuration Release --no-restore
-      
+
       - run:
           name: Run Unit Tests
           command: |
@@ -63,14 +65,14 @@ jobs:
               --verbosity normal \
               --logger trx \
               --results-directory TestResults
-      
+
       - store_test_results:
           path: TestResults
-      
+
       - store_artifacts:
           path: TestResults
           destination: test-results
-      
+
       - persist_to_workspace:
           root: .
           paths:
@@ -78,51 +80,33 @@ jobs:
             - Dotnet.Webapi/Dockerfile
             - TestResults
 
-  # Snyk Security Scan
+  # ============================================================================
+  # Snyk Security Scan Job - Using Snyk Orb
+  # ============================================================================
   snyk-security-scan:
     executor: dotnet-executor
     steps:
       - checkout
-      
+
       - attach_workspace:
           at: .
-      
+
       - run:
           name: Restore Dependencies
           command: dotnet restore
-      
+
       - run:
           name: Build for Snyk Analysis
           command: dotnet build --configuration Release --no-restore
-      
-      - run:
-          name: Install Snyk CLI
-          command: |
-            # Download and install Snyk CLI manually (no sudo required)
-            curl -Lo /tmp/snyk https://github.com/snyk/cli/releases/latest/download/snyk-linux
-            chmod +x /tmp/snyk
-            echo 'export PATH="/tmp:$PATH"' >> $BASH_ENV
-            
-            # Verify installation
-            /tmp/snyk --version
-      
-      - run:
-          name: Authenticate Snyk
-          command: /tmp/snyk auth $SNYK_TOKEN
-      
-      - run:
-          name: Run Snyk Security Scan
-          command: |
-            echo "Running Snyk security scan..."
-            
-            # Scan for vulnerabilities
-            /tmp/snyk test \
-              --severity-threshold=high \
-              --sarif-file-output=snyk.sarif \
-              --json-file-output=snyk-results.json || true
-            
-            echo "Snyk security scan completed"
-      
+
+      # Use Snyk orb to install CLI
+      - snyk/scan:
+          fail-on-issues: false
+          severity-threshold: high
+          monitor-on-build: true
+          token-variable: SNYK_TOKEN
+          additional-arguments: "--sarif-file-output=snyk.sarif --json-file-output=snyk-results.json"
+
       - run:
           name: Create Snyk Security Summary
           command: |
@@ -130,7 +114,6 @@ jobs:
             echo "" >> snyk-summary.md
             
             if [ -f snyk-results.json ]; then
-              # Parse JSON results and create summary
               VULNERABILITIES=$(cat snyk-results.json | jq -r '.vulnerabilities | length' 2>/dev/null || echo "0")
               HIGH_VULNS=$(cat snyk-results.json | jq -r '[.vulnerabilities[] | select(.severity == "high")] | length' 2>/dev/null || echo "0")
               MEDIUM_VULNS=$(cat snyk-results.json | jq -r '[.vulnerabilities[] | select(.severity == "medium")] | length' 2>/dev/null || echo "0")
@@ -153,39 +136,34 @@ jobs:
             else
               echo "❌ **Scan Failed**: Unable to generate vulnerability report" >> snyk-summary.md
             fi
-      
+
       - store_artifacts:
           path: snyk.sarif
           destination: security-reports/snyk.sarif
-      
+
       - store_artifacts:
           path: snyk-results.json
           destination: security-reports/snyk-results.json
-      
+
       - store_artifacts:
           path: snyk-summary.md
           destination: security-reports/snyk-summary.md
 
-  # SonarQube Code Quality Scan
+  # ============================================================================
+  # SonarQube Code Quality Scan Job - Optimized with SonarCloud Orb
+  # ============================================================================
   sonarqube-scan:
     executor: dotnet-executor
     steps:
       - checkout
-      
+
       - attach_workspace:
           at: .
-      
-      - run:
-          name: Install Required Tools
-          command: |
-            # Update package list and install unzip (required by SonarCloud orb)
-            apt-get update
-            apt-get install -y unzip
-      
+
       - run:
           name: Restore Dependencies
           command: dotnet restore
-      
+
       - run:
           name: Build and Test with Coverage
           command: |
@@ -197,23 +175,25 @@ jobs:
               --results-directory TestResults \
               --collect:"XPlat Code Coverage" \
               --settings coverlet.runsettings
-      
-      - run:
-          name: Create SonarCloud Configuration
-          command: |
-            echo "sonar.projectKey=${SONAR_PROJECT_KEY}" > sonar-project.properties
-            echo "sonar.organization=${SONAR_ORGANIZATION}" >> sonar-project.properties
-            echo "sonar.host.url=https://sonarcloud.io" >> sonar-project.properties
-            echo "sonar.sources=Dotnet.Webapi" >> sonar-project.properties
-            echo "sonar.tests=Dotnet.Webapi.Tests" >> sonar-project.properties
-            echo "sonar.cs.dotcover.reportsPaths=**/TestResults/**/coverage.cobertura.xml" >> sonar-project.properties
-            echo "sonar.cs.vstest.reportsPaths=**/TestResults/*.trx" >> sonar-project.properties
-            cat sonar-project.properties
-      
+
+      # Use SonarCloud orb with optimized configuration
       - sonarcloud/scan:
           sonar_token_variable_name: SONAR_TOKEN
           cache_version: 1
-      
+          scanner_version: latest
+          sonar_scanner_opts: >-
+            -Dsonar.projectKey=${SONAR_PROJECT_KEY}
+            -Dsonar.organization=${SONAR_ORGANIZATION}
+            -Dsonar.sources=Dotnet.Webapi
+            -Dsonar.tests=Dotnet.Webapi.Tests
+            -Dsonar.cs.dotcover.reportsPaths=**/TestResults/**/coverage.cobertura.xml
+            -Dsonar.cs.vstest.reportsPaths=**/TestResults/*.trx
+            -Dsonar.host.url=https://sonarcloud.io
+            -Dsonar.branch.name=${CIRCLE_BRANCH}
+            -Dsonar.pullrequest.key=${CIRCLE_PR_NUMBER}
+            -Dsonar.pullrequest.branch=${CIRCLE_BRANCH}
+            -Dsonar.pullrequest.base=${CIRCLE_PR_REPONAME}
+
       - run:
           name: Create SonarQube Summary
           command: |
@@ -234,31 +214,32 @@ jobs:
             echo "- ✅ Code Coverage Analysis" >> sonarqube-summary.md
             echo "- ✅ Code Duplication Detection" >> sonarqube-summary.md
             echo "- ✅ Maintainability Assessment" >> sonarqube-summary.md
-      
+            echo "- ✅ Pull Request Analysis" >> sonarqube-summary.md
+
       - store_artifacts:
           path: sonarqube-summary.md
           destination: quality-reports/sonarqube-summary.md
 
-  # Docker Build and Scan
+  # ============================================================================
+  # Docker Build and Scan Job - Optimized with Docker Orb
+  # ============================================================================
   build-and-scan-docker-image:
     executor: ubuntu-docker
     steps:
       - checkout
-      
+
       - attach_workspace:
           at: .
-      
+
       - setup_remote_docker:
           docker_layer_caching: true
-      
+
       - run:
           name: Generate Docker Image Tags
           command: |
-            # Create meaningful image tags based on context
             SHORT_SHA=${CIRCLE_SHA1:0:8}
             
             if [[ "${CIRCLE_BRANCH}" == "main" || "${CIRCLE_BRANCH}" == "master" ]]; then
-              # Main branch: use semantic-like versioning with date and commit
               DATE_TAG=$(date +%Y.%m.%d)
               VERSION_TAG="${DATE_TAG}-${SHORT_SHA}"
               VERSIONED_IMAGE="${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}"
@@ -266,105 +247,53 @@ jobs:
               echo "export VERSIONED_IMAGE='${VERSIONED_IMAGE}'" >> $BASH_ENV
               echo "export LATEST_IMAGE='${LATEST_IMAGE}'" >> $BASH_ENV
               echo "export BUILD_LATEST='true'" >> $BASH_ENV
+              echo "export DOCKER_TAGS='${VERSION_TAG},latest'" >> $BASH_ENV
             elif [[ "${CIRCLE_BRANCH}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-              # Release tags: use the tag name directly
               VERSION_TAG="${CIRCLE_BRANCH}"
               VERSIONED_IMAGE="${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}"
               echo "export VERSIONED_IMAGE='${VERSIONED_IMAGE}'" >> $BASH_ENV
               echo "export BUILD_LATEST='false'" >> $BASH_ENV
+              echo "export DOCKER_TAGS='${VERSION_TAG}'" >> $BASH_ENV
             else
-              # Feature branches: branch-commit-build format
               SAFE_BRANCH_NAME=$(echo "${CIRCLE_BRANCH}" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
               VERSION_TAG="${SAFE_BRANCH_NAME}-${SHORT_SHA}-${CIRCLE_BUILD_NUM}"
               VERSIONED_IMAGE="${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}"
               echo "export VERSIONED_IMAGE='${VERSIONED_IMAGE}'" >> $BASH_ENV
               echo "export BUILD_LATEST='false'" >> $BASH_ENV
+              echo "export DOCKER_TAGS='${VERSION_TAG}'" >> $BASH_ENV
             fi
             
             echo "export VERSION_TAG='${VERSION_TAG}'" >> $BASH_ENV
             echo "export SHORT_SHA='${SHORT_SHA}'" >> $BASH_ENV
             
-            # Output for verification
             echo "Branch: ${CIRCLE_BRANCH}"
             echo "Commit: ${SHORT_SHA}"
             echo "Version Tag: ${VERSION_TAG}"
             echo "Versioned Image: ${VERSIONED_IMAGE}"
+            echo "Docker Tags: ${DOCKER_TAGS}"
       
-      - run:
-          name: Build Docker Image
-          command: |
-            echo "Building Docker image..."
-            echo "Image: ${VERSIONED_IMAGE}"
-            
-            if ! docker build -f ./Dotnet.Webapi/Dockerfile -t ${VERSIONED_IMAGE} .; then
-              echo "❌ Docker build failed"
-              exit 1
-            fi
-            
-            # Build latest tag for main branch
-            if [[ "${BUILD_LATEST}" == "true" ]]; then
-              if ! docker build -f ./Dotnet.Webapi/Dockerfile -t ${LATEST_IMAGE} .; then
-                echo "❌ Docker build failed for latest tag"
-                exit 1
-              fi
-              echo "✅ Also tagged as: ${LATEST_IMAGE}"
-            fi
-            
-            echo "✅ Docker build completed successfully"
-      
-      - run:
-          name: Create Docker Build Summary
-          command: |
-            echo "## 🐳 Docker Image Build Summary" > docker-build-summary.md
-            echo "" >> docker-build-summary.md
-            echo "### Build Details" >> docker-build-summary.md
-            echo "- **Branch**: ${CIRCLE_BRANCH}" >> docker-build-summary.md
-            echo "- **Commit**: ${SHORT_SHA}" >> docker-build-summary.md
-            echo "- **Version Tag**: ${VERSION_TAG}" >> docker-build-summary.md
-            echo "- **Registry**: ${REGISTRY_PATH}" >> docker-build-summary.md
-            echo "" >> docker-build-summary.md
-            echo "### Built Images" >> docker-build-summary.md
-            echo "- 📦 \`${VERSIONED_IMAGE}\`" >> docker-build-summary.md
-            if [[ "${BUILD_LATEST}" == "true" ]]; then
-              echo "- 📦 \`${LATEST_IMAGE}\`" >> docker-build-summary.md
-            fi
-            echo "" >> docker-build-summary.md
-            echo "### Next Steps" >> docker-build-summary.md
-            echo "- 🔍 Security scanning with Snyk" >> docker-build-summary.md
-            if [[ "${CIRCLE_BRANCH}" == "main" || "${CIRCLE_BRANCH}" == "master" ]]; then
-              echo "- 🚀 Push to JFrog Artifactory (main branch)" >> docker-build-summary.md
-            else
-              echo "- ⏭️ Scan only (feature branch - no push)" >> docker-build-summary.md
-            fi
-      
-      - run:
-          name: Install Snyk CLI for Container Scan
-          command: |
-            # Download and install Snyk CLI manually (no sudo required)
-            curl -Lo /tmp/snyk https://github.com/snyk/cli/releases/latest/download/snyk-linux
-            chmod +x /tmp/snyk
-            echo 'export PATH="/tmp:$PATH"' >> $BASH_ENV
-            
-            # Verify installation
-            /tmp/snyk --version
-      
-      - run:
-          name: Authenticate Snyk
-          command: /tmp/snyk auth $SNYK_TOKEN
-      
-      - run:
-          name: Scan Docker Image with Snyk
-          command: |
-            echo "Scanning Docker image: ${VERSIONED_IMAGE}"
-            
-            # Scan the Docker image
-            /tmp/snyk container test ${VERSIONED_IMAGE} \
-              --severity-threshold=high \
-              --sarif-file-output=snyk-docker.sarif \
-              --json-file-output=snyk-docker-results.json \
-              --file=./Dotnet.Webapi/Dockerfile || true
-            
-            echo "Docker image scan completed"
+      # Use Docker orb to build image with optimized caching and multi-tag support
+      - docker/build:
+          dockerfile: ./Dotnet.Webapi/Dockerfile
+          image: ${REGISTRY_PATH}/${IMAGE_NAME}
+          tag: ${DOCKER_TAGS}
+          cache_from: ${REGISTRY_PATH}/${IMAGE_NAME}:latest
+          extra_build_args: |
+            --build-arg BUILDKIT_INLINE_CACHE=1
+            --label org.opencontainers.image.source=https://github.com/thiago-tota/dotnet-webapi-ci-poc
+            --label org.opencontainers.image.revision=${CIRCLE_SHA1}
+            --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+            --label org.opencontainers.image.version=${VERSION_TAG}
+
+      # Use Snyk orb for container scanning
+      - snyk/scan:
+          command: container test
+          target-file: ./Dotnet.Webapi/Dockerfile
+          docker-image-name: $VERSIONED_IMAGE
+          fail-on-issues: false
+          severity-threshold: high
+          token-variable: SNYK_TOKEN
+          additional-arguments: "--sarif-file-output=snyk-docker.sarif --json-file-output=snyk-docker-results.json"
       
       - run:
           name: Create Docker Security Summary
@@ -378,7 +307,6 @@ jobs:
             echo "" >> docker-security-summary.md
             
             if [ -f snyk-docker-results.json ]; then
-              # Parse container scan results
               CONTAINER_VULNS=$(cat snyk-docker-results.json | jq -r '.vulnerabilities | length' 2>/dev/null || echo "0")
               HIGH_CONTAINER_VULNS=$(cat snyk-docker-results.json | jq -r '[.vulnerabilities[] | select(.severity == "high")] | length' 2>/dev/null || echo "0")
               MEDIUM_CONTAINER_VULNS=$(cat snyk-docker-results.json | jq -r '[.vulnerabilities[] | select(.severity == "medium")] | length' 2>/dev/null || echo "0")
@@ -394,105 +322,48 @@ jobs:
               echo "" >> docker-security-summary.md
               
               if [ "$CONTAINER_VULNS" -gt "0" ]; then
-                echo "⚠️ **Container Security Issues**: $CONTAINER_VULNS vulnerabilities found in base image or dependencies" >> docker-security-summary.md
+                echo "⚠️ **Container Security Issues**: $CONTAINER_VULNS vulnerabilities found" >> docker-security-summary.md
               else
                 echo "✅ **Container Secure**: No vulnerabilities found in Docker image!" >> docker-security-summary.md
               fi
             else
-              echo "❌ **Container Scan Failed**: Unable to generate container vulnerability report" >> docker-security-summary.md
+              echo "❌ **Container Scan Failed**: Unable to generate vulnerability report" >> docker-security-summary.md
             fi
-      
-      - store_artifacts:
-          path: docker-build-summary.md
-          destination: docker-reports/docker-build-summary.md
-      
+
       - store_artifacts:
           path: docker-security-summary.md
           destination: docker-reports/docker-security-summary.md
-      
+
       - store_artifacts:
           path: snyk-docker.sarif
           destination: security-reports/snyk-docker.sarif
-      
+
       - store_artifacts:
           path: snyk-docker-results.json
           destination: security-reports/snyk-docker-results.json
-      
+
       - persist_to_workspace:
           root: .
           paths:
-            - docker-build-summary.md
             - docker-security-summary.md
 
-  # JFrog Registry Push
+  # ============================================================================
+  # JFrog Registry Push Job - Using Artifactory Orb
+  # ============================================================================
   push-docker-image-jfrog:
     executor: ubuntu-docker
     steps:
       - checkout
-      
+
       - attach_workspace:
           at: .
-      
+
       - setup_remote_docker:
           docker_layer_caching: true
-      
-      - artifactory/install
-      
-      - run:
-          name: Configure JFrog CLI
-          command: |
-            # Configure JFrog CLI authentication
-            echo "Configuring JFrog CLI..."
-            
-            # Check authentication options - prioritize Access Token
-            if [ -n "${ARTIFACTORY_API_KEY}" ]; then
-              echo "✅ Using Access Token authentication"
-              
-              # Configure with Access Token
-              if jfrog config add --url="${ARTIFACTORY_URL}" --access-token="${ARTIFACTORY_API_KEY}" --interactive=false; then
-                echo "✅ JFrog CLI configured successfully"
-              else
-                echo "❌ Failed to configure JFrog CLI with Access Token"
-                exit 1
-              fi
-              
-            elif [ -n "${CIRCLE_OIDC_TOKEN}" ]; then
-              echo "⚠️  Access Token not available, attempting OIDC authentication..."
-              
-              # Configure with OIDC token
-              if jfrog config add --url="${ARTIFACTORY_URL}" --access-token="${CIRCLE_OIDC_TOKEN}" --interactive=false; then
-                echo "✅ JFrog CLI configured successfully with OIDC"
-              else
-                echo "❌ Failed to configure JFrog CLI with OIDC token"
-                echo ""
-                echo "🛠️  TO FIX AUTHENTICATION:"
-                echo "   1. Generate an Access Token in JFrog Artifactory"
-                echo "   2. Add ARTIFACTORY_API_KEY to CircleCI context 'dotnet-webapi-security'"
-                exit 1
-              fi
-            else
-              echo "❌ No authentication credentials available"
-              echo ""
-              echo "🛠️  TO FIX AUTHENTICATION:"
-              echo "1. 🔑 RECOMMENDED: Generate an Access Token in JFrog Artifactory"
-              echo "   - Go to JFrog > User Management > Access Tokens"
-              echo "   - Add ARTIFACTORY_API_KEY to CircleCI context 'dotnet-webapi-security'"
-              exit 1
-            fi
-            
-            # Test the configuration
-            echo "Testing JFrog connection..."
-            if jfrog rt ping; then
-              echo "✅ JFrog connection successful!"
-            else
-              echo "❌ JFrog connection failed"
-              exit 1
-            fi
-      
+
       - run:
           name: Generate Docker Image Tags for Push
           command: |
-            # Recreate the same image naming logic as build step
             SHORT_SHA=${CIRCLE_SHA1:0:8}
             
             if [[ "${CIRCLE_BRANCH}" == "main" || "${CIRCLE_BRANCH}" == "master" ]]; then
@@ -503,72 +374,72 @@ jobs:
               echo "export VERSIONED_IMAGE='${VERSIONED_IMAGE}'" >> $BASH_ENV
               echo "export LATEST_IMAGE='${LATEST_IMAGE}'" >> $BASH_ENV
               echo "export PUSH_LATEST='true'" >> $BASH_ENV
+              echo "export DOCKER_TAGS='${VERSION_TAG},latest'" >> $BASH_ENV
             elif [[ "${CIRCLE_BRANCH}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
               VERSION_TAG="${CIRCLE_BRANCH}"
               VERSIONED_IMAGE="${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}"
               echo "export VERSIONED_IMAGE='${VERSIONED_IMAGE}'" >> $BASH_ENV
               echo "export PUSH_LATEST='false'" >> $BASH_ENV
+              echo "export DOCKER_TAGS='${VERSION_TAG}'" >> $BASH_ENV
             else
               SAFE_BRANCH_NAME=$(echo "${CIRCLE_BRANCH}" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
               VERSION_TAG="${SAFE_BRANCH_NAME}-${SHORT_SHA}-${CIRCLE_BUILD_NUM}"
               VERSIONED_IMAGE="${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}"
               echo "export VERSIONED_IMAGE='${VERSIONED_IMAGE}'" >> $BASH_ENV
               echo "export PUSH_LATEST='false'" >> $BASH_ENV
+              echo "export DOCKER_TAGS='${VERSION_TAG}'" >> $BASH_ENV
             fi
             
             echo "export VERSION_TAG='${VERSION_TAG}'" >> $BASH_ENV
             echo "export SHORT_SHA='${SHORT_SHA}'" >> $BASH_ENV
-      
+
+      # Use Artifactory orb to install and configure JFrog CLI
+      - artifactory/install
+
       - run:
-          name: Rebuild Docker Image for Push
+          name: Configure JFrog CLI
           command: |
-            echo "Rebuilding Docker image for push..."
-            echo "Branch: ${CIRCLE_BRANCH}"
-            echo "Commit: ${SHORT_SHA}"
-            echo "Version Tag: ${VERSION_TAG}"
-            echo "Image: ${VERSIONED_IMAGE}"
-            
-            if ! docker build -f ./Dotnet.Webapi/Dockerfile -t ${VERSIONED_IMAGE} .; then
-              echo "❌ Docker build failed"
+            echo "Configuring JFrog CLI..."
+            if [ -n "${ARTIFACTORY_API_KEY}" ]; then
+              jfrog config add --url="${ARTIFACTORY_URL}" --access-token="${ARTIFACTORY_API_KEY}" --interactive=false
+              echo "✅ JFrog CLI configured successfully"
+            else
+              echo "❌ ARTIFACTORY_API_KEY not found in environment"
               exit 1
             fi
-            
-            # Build latest tag for main branch
-            if [[ "${PUSH_LATEST}" == "true" ]]; then
-              if ! docker build -f ./Dotnet.Webapi/Dockerfile -t ${LATEST_IMAGE} .; then
-                echo "❌ Docker build failed for latest tag"
-                exit 1
-              fi
-              echo "✅ Also built: ${LATEST_IMAGE}"
-            fi
-            
-            echo "✅ Docker image rebuilt successfully"
-      
+
+      # Use Docker orb to rebuild image efficiently with same tags
+      - docker/build:
+          dockerfile: ./Dotnet.Webapi/Dockerfile
+          image: ${REGISTRY_PATH}/${IMAGE_NAME}
+          tag: ${DOCKER_TAGS}
+          cache_from: ${REGISTRY_PATH}/${IMAGE_NAME}:latest
+          extra_build_args: |
+            --build-arg BUILDKIT_INLINE_CACHE=1
+            --label org.opencontainers.image.source=https://github.com/thiago-tota/dotnet-webapi-ci-poc
+            --label org.opencontainers.image.revision=${CIRCLE_SHA1}
+            --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+            --label org.opencontainers.image.version=${VERSION_TAG}
+
       - run:
           name: Push Docker Image to JFrog
           command: |
-            echo "Pushing image to JFrog Artifactory..."
-            echo "Branch: ${CIRCLE_BRANCH}"
-            echo "Commit: ${SHORT_SHA}"
-            echo "Version Tag: ${VERSION_TAG}"
-            echo "Image: ${VERSIONED_IMAGE}"
-            
-            if ! jfrog rt docker-push ${VERSIONED_IMAGE} alley-oop-container/circleci; then
-              echo "❌ Failed to push versioned image"
-              exit 1
-            fi
-            
-            # Push latest tag for main branch
+            echo "Pushing image to JFrog Artifactory: ${VERSIONED_IMAGE}"
+            jfrog rt docker-push ${VERSIONED_IMAGE} alley-oop-container/circleci
+
+      - run:
+          name: Push Latest Tag (Main Branch Only)
+          command: |
             if [[ "${PUSH_LATEST}" == "true" ]]; then
-              echo "Pushing latest tag..."
-              if ! jfrog rt docker-push ${LATEST_IMAGE} alley-oop-container/circleci; then
-                echo "❌ Failed to push latest image"
-                exit 1
-              fi
+              echo "Pushing latest tag: ${LATEST_IMAGE}"
+              jfrog rt docker-push ${LATEST_IMAGE} alley-oop-container/circleci
+            else
+              echo "Skipping latest tag push (not main branch)"
             fi
-      
+
+      # Use Artifactory orb for build integration
       - artifactory/build-integration
-      
+
       - run:
           name: Create Deployment Summary
           command: |
@@ -599,15 +470,17 @@ jobs:
             echo "- ✅ Code quality checked (SonarQube)" >> deployment-summary.md
             echo "- ✅ Tests passed" >> deployment-summary.md
             echo "- ✅ Container security verified" >> deployment-summary.md
-      
+
       - store_artifacts:
           path: deployment-summary.md
           destination: deployment-reports/deployment-summary.md
 
+# ============================================================================
 # Workflows
+# ============================================================================
 workflows:
   version: 2
-  
+
   # Main CI/CD Pipeline
   ci-cd-pipeline:
     jobs:
@@ -616,7 +489,7 @@ workflows:
           filters:
             branches:
               only: /.*/
-      
+
       # Security and quality analysis
       - snyk-security-scan:
           context: dotnet-webapi-security
@@ -625,7 +498,7 @@ workflows:
           filters:
             branches:
               only: /.*/
-      
+
       - sonarqube-scan:
           context: dotnet-webapi-security
           requires:
@@ -633,7 +506,7 @@ workflows:
           filters:
             branches:
               only: /.*/
-      
+
       # Docker build and scan
       - build-and-scan-docker-image:
           context: dotnet-webapi-security
@@ -644,12 +517,12 @@ workflows:
           filters:
             branches:
               only: /.*/
-      
-      # Deploy to JFrog registry  
+
+      # Deploy to JFrog registry
       - push-docker-image-jfrog:
           context: dotnet-webapi-security
           requires:
             - build-and-scan-docker-image
           filters:
             branches:
-              only: /.*/ 
+              only: /.*/
