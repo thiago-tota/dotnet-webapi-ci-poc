@@ -204,11 +204,21 @@ jobs:
               --collect:"XPlat Code Coverage" \
               --settings coverlet.runsettings
       
+      - run:
+          name: Create SonarCloud Configuration
+          command: |
+            echo "sonar.projectKey=${SONAR_PROJECT_KEY}" > sonar-project.properties
+            echo "sonar.organization=${SONAR_ORGANIZATION}" >> sonar-project.properties
+            echo "sonar.host.url=https://sonarcloud.io" >> sonar-project.properties
+            echo "sonar.sources=Dotnet.Webapi" >> sonar-project.properties
+            echo "sonar.tests=Dotnet.Webapi.Tests" >> sonar-project.properties
+            echo "sonar.cs.dotcover.reportsPaths=**/TestResults/**/coverage.cobertura.xml" >> sonar-project.properties
+            echo "sonar.cs.vstest.reportsPaths=**/TestResults/*.trx" >> sonar-project.properties
+            cat sonar-project.properties
+      
       - sonarcloud/scan:
           sonar_token_variable_name: SONAR_TOKEN
           cache_version: 1
-          project_key: ${SONAR_PROJECT_KEY}
-          organization: ${SONAR_ORGANIZATION}
       
       - run:
           name: Create SonarQube Summary
