@@ -17,6 +17,7 @@ permissions:
 env:
   DOTNET_VERSION: '8.0.x'  # Matches your .NET 8 project
   IMAGE_NAME: dotnet-webapi  # Name for the container image
+  REGISTRY_PATH: hkjctest.jfrog.io/alley-oop-container/github-actions  # JFrog registry path
   # SonarCloud configuration - Update these values for your account
   SONAR_PROJECT_KEY: 'thiago-tota_gha-dotnet-webapi'
   SONAR_ORGANIZATION: 'thiago-tota'
@@ -158,10 +159,87 @@ jobs:
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       run: dotnet sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
 
-  build-and-push-image-jfrog:
+  build-and-scan-docker-image:
     needs: [build-and-test, snyk-security-scan, sonarqube-scan]
     runs-on: ubuntu-latest
-    # Only run on main/master branch or manual trigger
+    
+    outputs:
+      image-name: ${{ steps.build-info.outputs.image-name }}
+      image-tag: ${{ steps.build-info.outputs.image-tag }}
+      
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Build Docker Image
+      id: build-info
+      env:
+        VERSION_TAG: ${{ github.run_number }}
+        BRANCH_NAME: ${{ github.ref_name }}
+      run: |
+        # Create branch-specific tag for non-main branches
+        if [[ "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "master" ]]; then
+          VERSIONED_IMAGE=${{ env.REGISTRY_PATH }}/${{ env.IMAGE_NAME }}:${VERSION_TAG}
+        else
+          # For feature branches, include branch name in tag
+          SAFE_BRANCH_NAME=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
+          VERSIONED_IMAGE=${{ env.REGISTRY_PATH }}/${{ env.IMAGE_NAME }}:${VERSION_TAG}-${SAFE_BRANCH_NAME}
+        fi
+        
+        # Build the Docker image
+        echo "Building Docker image..."
+        echo "Branch: $BRANCH_NAME"
+        echo "Image: $VERSIONED_IMAGE"
+        if ! docker build -f ./Dotnet.Webapi/Dockerfile -t ${VERSIONED_IMAGE} .; then
+          echo "❌ Docker build failed"
+          exit 1
+        fi
+        echo "✅ Docker build completed successfully"
+        
+        # Set outputs for other jobs
+        echo "image-name=${VERSIONED_IMAGE}" >> $GITHUB_OUTPUT
+        echo "image-tag=${VERSION_TAG}" >> $GITHUB_OUTPUT
+        
+        # Output the built image details
+        echo "✅ Successfully built image:"
+        echo " - ${VERSIONED_IMAGE}"
+
+    - name: Setup Snyk CLI for Docker Scanning
+      uses: snyk/actions/setup@master
+      
+    - name: Run Snyk Docker Security Scan
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        VERSION_TAG: ${{ github.run_number }}
+        BRANCH_NAME: ${{ github.ref_name }}
+      run: |
+        # Get the image name that was just built (same logic as build step)
+        if [[ "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "master" ]]; then
+          VERSIONED_IMAGE=${{ env.REGISTRY_PATH }}/${{ env.IMAGE_NAME }}:${VERSION_TAG}
+        else
+          SAFE_BRANCH_NAME=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
+          VERSIONED_IMAGE=${{ env.REGISTRY_PATH }}/${{ env.IMAGE_NAME }}:${VERSION_TAG}-${SAFE_BRANCH_NAME}
+        fi
+        
+        echo "Scanning Docker image for vulnerabilities..."
+        echo "Branch: $BRANCH_NAME"
+        echo "Image: $VERSIONED_IMAGE"
+        snyk container test $VERSIONED_IMAGE \
+          --severity-threshold=high \
+          --sarif-file-output=snyk-docker.sarif \
+          --file=./Dotnet.Webapi/Dockerfile
+          
+    - name: Upload Snyk Docker results to GitHub Code Scanning
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: snyk-docker.sarif
+        category: snyk-docker
+
+  push-docker-image-jfrog:
+    needs: build-and-scan-docker-image
+    runs-on: ubuntu-latest
+    # Only push to registry on main/master branch or manual trigger
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch'
     steps:
     - name: Checkout repository
@@ -180,36 +258,21 @@ jobs:
         echo "Testing JFrog connection..."
         jf rt ping
 
-    - name: Build Tag and push Docker Image
-      env:
-        REGISTRY_PATH: hkjctest.jfrog.io/alley-oop-container/github-actions
-        IMAGE_NAME: dotnet-webapi
-        VERSION_TAG: ${{ github.run_number }}
+    - name: Push Docker Image to JFrog
       run: |
-        # Define image names with tags
-        VERSIONED_IMAGE=${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}
+        # Get the image name from the build job
+        VERSIONED_IMAGE="${{ needs.build-and-scan-docker-image.outputs.image-name }}"
         
-        # Build the Docker image with Alpine Linux base
-        echo "Building Docker image..."
-        if ! jf docker build -f ./Dotnet.Webapi/Dockerfile -t ${VERSIONED_IMAGE} .; then
-          echo "❌ Docker build failed"
-          exit 1
-        fi
-        echo "✅ Docker build completed successfully"
-        
-        # Optional: Scan the image for vulnerabilities (commented out - requires JFrog Xray)
-        # echo "Scanning image for vulnerabilities..."
-        # jf docker scan ${VERSIONED_IMAGE}
-        
-        # Push both tags to JFrog Artifactory
-        echo "Pushing versioned tag to JFrog Artifactory..."
+        # Push the Docker image to JFrog Artifactory
+        echo "Pushing image to JFrog Artifactory..."
+        echo "Image: $VERSIONED_IMAGE"
         if ! jf docker push ${VERSIONED_IMAGE}; then
-          echo "❌ Failed to push versioned image"
+          echo "❌ Failed to push image"
           exit 1
         fi
         
         # Output the pushed image details
-        echo "✅ Successfully pushed images:"
+        echo "✅ Successfully pushed image:"
         echo " - ${VERSIONED_IMAGE}"
           
     - name: Publish Build info With JFrog CLI
