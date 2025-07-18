@@ -17,7 +17,7 @@ environment: &default_environment
 orbs:
   docker: circleci/docker@2.8.2
   snyk: snyk/snyk@2.3.0
-  jfrog: jfrog/artifactory-orb@1.0.1
+  artifactory: circleci/artifactory@1.0.0
   sonarcloud: sonarsource/sonarcloud@3.0.0
 
 # Executors
@@ -433,9 +433,9 @@ jobs:
             - docker-security-summary.md
 
   # ============================================================================
-  # JFROG REGISTRY PUSH JOB
+  # JFROG DEPLOYMENT SUMMARY JOB (Custom job for summary generation)
   # ============================================================================
-  push-docker-image-jfrog:
+  create-deployment-summary:
     executor: ubuntu-docker
     steps:
       - checkout
@@ -443,45 +443,10 @@ jobs:
       - attach_workspace:
           at: .
       
-      - setup_remote_docker:
-          docker_layer_caching: true
-      
-      - jfrog/install
-      
       - run:
-          name: Verify JFrog CLI Installation
+          name: Generate Docker Image Tag Information
           command: |
-            # Ensure JFrog CLI is in PATH
-            export PATH="$PATH:/usr/local/bin"
-            which jf || echo "JFrog CLI not found in PATH"
-            jf --version || echo "JFrog CLI version check failed"
-      
-      - run:
-          name: Configure JFrog CLI
-          command: |
-            # Ensure JFrog CLI is in PATH
-            export PATH="$PATH:/usr/local/bin"
-            
-            # Configure JFrog CLI with OIDC or access token
-            if [ -n "${JF_ACCESS_TOKEN}" ]; then
-              jf config add --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}" --interactive=false
-            else
-              echo "Using OIDC authentication with JFrog"
-              # OIDC configuration would go here
-            fi
-      
-      - run:
-          name: Verify JFrog Connection
-          command: |
-            # Ensure JFrog CLI is in PATH
-            export PATH="$PATH:/usr/local/bin"
-            echo "Testing JFrog connection..."
-            jf rt ping
-      
-      - run:
-          name: Generate Docker Image Tags for Push
-          command: |
-            # Recreate the same image naming logic as build step
+            # Recreate the same image naming logic as build step for summary
             SHORT_SHA=${CIRCLE_SHA1:0:8}
             
             if [[ "${CIRCLE_BRANCH}" == "main" || "${CIRCLE_BRANCH}" == "master" ]]; then
@@ -507,57 +472,6 @@ jobs:
             
             echo "export VERSION_TAG='${VERSION_TAG}'" >> $BASH_ENV
             echo "export SHORT_SHA='${SHORT_SHA}'" >> $BASH_ENV
-      
-      - run:
-          name: Rebuild Docker Image for Push
-          command: |
-            echo "Rebuilding Docker image for push..."
-            echo "Branch: ${CIRCLE_BRANCH}"
-            echo "Commit: ${SHORT_SHA}"
-            echo "Version Tag: ${VERSION_TAG}"
-            echo "Image: ${VERSIONED_IMAGE}"
-            
-            if ! docker build -f ./Dotnet.Webapi/Dockerfile -t ${VERSIONED_IMAGE} .; then
-              echo "❌ Docker build failed"
-              exit 1
-            fi
-            
-            # Build latest tag for main branch
-            if [[ "${PUSH_LATEST}" == "true" ]]; then
-              if ! docker build -f ./Dotnet.Webapi/Dockerfile -t ${LATEST_IMAGE} .; then
-                echo "❌ Docker build failed for latest tag"
-                exit 1
-              fi
-              echo "✅ Also built: ${LATEST_IMAGE}"
-            fi
-            
-            echo "✅ Docker image rebuilt successfully"
-      
-      - run:
-          name: Push Docker Image to JFrog
-          command: |
-            # Ensure JFrog CLI is in PATH
-            export PATH="$PATH:/usr/local/bin"
-            
-            echo "Pushing image to JFrog Artifactory..."
-            echo "Branch: ${CIRCLE_BRANCH}"
-            echo "Commit: ${SHORT_SHA}"
-            echo "Version Tag: ${VERSION_TAG}"
-            echo "Image: ${VERSIONED_IMAGE}"
-            
-            if ! jf docker push ${VERSIONED_IMAGE}; then
-              echo "❌ Failed to push versioned image"
-              exit 1
-            fi
-            
-            # Push latest tag for main branch
-            if [[ "${PUSH_LATEST}" == "true" ]]; then
-              echo "Pushing latest tag..."
-              if ! jf docker push ${LATEST_IMAGE}; then
-                echo "❌ Failed to push latest image"
-                exit 1
-              fi
-            fi
       
       - run:
           name: Create Deployment Summary
@@ -589,22 +503,6 @@ jobs:
             echo "- ✅ Code quality checked (SonarQube)" >> deployment-summary.md
             echo "- ✅ Tests passed" >> deployment-summary.md
             echo "- ✅ Container security verified" >> deployment-summary.md
-      
-      - run:
-          name: Publish Build Info to JFrog
-          command: |
-            # Ensure JFrog CLI is in PATH
-            export PATH="$PATH:/usr/local/bin"
-            
-            # Collect environment variables for the build
-            jf rt build-collect-env
-            # Collect VCS details from git and add them to the build
-            jf rt build-add-git
-            # Publish build info
-            jf rt build-publish
-          environment:
-            JFROG_CLI_BUILD_NAME: dotnet-webapi
-            JFROG_CLI_BUILD_NUMBER: ${CIRCLE_BUILD_NUM}
       
       - store_artifacts:
           path: deployment-summary.md
@@ -653,11 +551,27 @@ workflows:
             branches:
               only: /.*/
       
-      # Stage 4: Deploy to registry (all branches for testing)
-      - push-docker-image-jfrog:
+      # Stage 4: Deploy to registry using JFrog Orb (all branches for testing)
+      - artifactory/docker-publish:
+          name: push-docker-image-jfrog
           context: dotnet-webapi-security
+          docker-registry: hkjctest.jfrog.io
+          repository: alley-oop-container/circleci
+          dockerfile: ./Dotnet.Webapi/Dockerfile
+          docker-tag: hkjctest.jfrog.io/alley-oop-container/circleci/dotnet-webapi:${CIRCLE_BRANCH}-${CIRCLE_SHA1:0:8}-${CIRCLE_BUILD_NUM}
+          build-steps:
+            - attach_workspace:
+                at: .
           requires:
             - build-and-scan-docker-image
+          filters:
+            branches:
+              only: /.*/
+      
+      # Stage 5: Create deployment summary
+      - create-deployment-summary:
+          requires:
+            - push-docker-image-jfrog
           filters:
             branches:
               only: /.*/ 
