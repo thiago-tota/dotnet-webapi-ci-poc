@@ -36,9 +36,7 @@ executors:
 
 # Jobs
 jobs:
-  # ============================================================================
-  # BUILD AND TEST JOB
-  # ============================================================================
+  # Build and Test
   build-and-test:
     executor: dotnet-executor
     steps:
@@ -80,9 +78,7 @@ jobs:
             - Dotnet.Webapi/Dockerfile
             - TestResults
 
-  # ============================================================================
-  # SNYK SECURITY SCAN JOB
-  # ============================================================================
+  # Snyk Security Scan
   snyk-security-scan:
     executor: dotnet-executor
     steps:
@@ -170,9 +166,7 @@ jobs:
           path: snyk-summary.md
           destination: security-reports/snyk-summary.md
 
-  # ============================================================================
-  # SONARQUBE CODE QUALITY SCAN JOB
-  # ============================================================================
+  # SonarQube Code Quality Scan
   sonarqube-scan:
     executor: dotnet-executor
     steps:
@@ -245,9 +239,7 @@ jobs:
           path: sonarqube-summary.md
           destination: quality-reports/sonarqube-summary.md
 
-  # ============================================================================
-  # DOCKER BUILD AND SCAN JOB
-  # ============================================================================
+  # Docker Build and Scan
   build-and-scan-docker-image:
     executor: ubuntu-docker
     steps:
@@ -432,9 +424,7 @@ jobs:
             - docker-build-summary.md
             - docker-security-summary.md
 
-  # ============================================================================
-  # JFROG REGISTRY PUSH JOB (Using orb commands)
-  # ============================================================================
+  # JFrog Registry Push
   push-docker-image-jfrog:
     executor: ubuntu-docker
     steps:
@@ -449,7 +439,55 @@ jobs:
       - artifactory/install
       
       - run:
-          name: Configure JFrog CLI for OIDC
+          name: Configure JFrog CLI
+          command: |
+            # Configure JFrog CLI authentication
+            echo "Configuring JFrog CLI..."
+            
+            # Check authentication options - prioritize Access Token
+            if [ -n "${ARTIFACTORY_API_KEY}" ]; then
+              echo "✅ Using Access Token authentication"
+              
+              # Configure with Access Token
+              if jfrog config add --url="${ARTIFACTORY_URL}" --access-token="${ARTIFACTORY_API_KEY}" --interactive=false; then
+                echo "✅ JFrog CLI configured successfully"
+              else
+                echo "❌ Failed to configure JFrog CLI with Access Token"
+                exit 1
+              fi
+              
+            elif [ -n "${CIRCLE_OIDC_TOKEN}" ]; then
+              echo "⚠️  Access Token not available, attempting OIDC authentication..."
+              
+              # Configure with OIDC token
+              if jfrog config add --url="${ARTIFACTORY_URL}" --access-token="${CIRCLE_OIDC_TOKEN}" --interactive=false; then
+                echo "✅ JFrog CLI configured successfully with OIDC"
+              else
+                echo "❌ Failed to configure JFrog CLI with OIDC token"
+                echo ""
+                echo "🛠️  TO FIX AUTHENTICATION:"
+                echo "   1. Generate an Access Token in JFrog Artifactory"
+                echo "   2. Add ARTIFACTORY_API_KEY to CircleCI context 'dotnet-webapi-security'"
+                exit 1
+              fi
+            else
+              echo "❌ No authentication credentials available"
+              echo ""
+              echo "🛠️  TO FIX AUTHENTICATION:"
+              echo "1. 🔑 RECOMMENDED: Generate an Access Token in JFrog Artifactory"
+              echo "   - Go to JFrog > User Management > Access Tokens"
+              echo "   - Add ARTIFACTORY_API_KEY to CircleCI context 'dotnet-webapi-security'"
+              exit 1
+            fi
+            
+            # Test the configuration
+            echo "Testing JFrog connection..."
+            if jfrog rt ping; then
+              echo "✅ JFrog connection successful!"
+            else
+              echo "❌ JFrog connection failed"
+              exit 1
+            fi
           command: |
             # Configure JFrog CLI for OIDC authentication
             echo "Configuring JFrog CLI with OIDC..."
@@ -569,19 +607,6 @@ jobs:
               echo "2. 🔄 ALTERNATIVE: Fix OIDC integration (more complex)"
               echo "   - CircleCI's OIDC discovery endpoints are currently not standard"
               echo "   - Contact CircleCI support for correct OIDC discovery URL format"
-              echo "   - Or wait for CircleCI to fix their OIDC endpoint structure"
-              exit 1
-            fi
-            
-            # Test the configuration
-            echo "Testing JFrog connection..."
-            if jfrog rt ping; then
-              echo "✅ JFrog connection successful!"
-            else
-              echo "❌ JFrog connection failed"
-              echo "Check your OIDC integration setup in JFrog"
-              exit 1
-            fi
       
       - run:
           name: Generate Docker Image Tags for Push
@@ -698,22 +723,20 @@ jobs:
           path: deployment-summary.md
           destination: deployment-reports/deployment-summary.md
 
-# ============================================================================
-# WORKFLOWS
-# ============================================================================
+# Workflows
 workflows:
   version: 2
   
-  # Main CI/CD workflow
+  # Main CI/CD Pipeline
   ci-cd-pipeline:
     jobs:
-      # Stage 1: Build and test foundation
+      # Build and test
       - build-and-test:
           filters:
             branches:
               only: /.*/
       
-      # Stage 2: Security and quality analysis (parallel)
+      # Security and quality analysis
       - snyk-security-scan:
           context: dotnet-webapi-security
           requires:
@@ -730,7 +753,7 @@ workflows:
             branches:
               only: /.*/
       
-      # Stage 3: Docker build and scan
+      # Docker build and scan
       - build-and-scan-docker-image:
           context: dotnet-webapi-security
           requires:
@@ -741,7 +764,7 @@ workflows:
             branches:
               only: /.*/
       
-      # Stage 4: Deploy to registry using JFrog Orb commands (all branches for testing)
+      # Deploy to JFrog registry  
       - push-docker-image-jfrog:
           context: dotnet-webapi-security
           requires:
