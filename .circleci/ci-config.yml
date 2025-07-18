@@ -15,7 +15,7 @@ environment: &default_environment
 
 # Orbs for extended functionality
 orbs:
-  docker: circleci/docker@2.4.0
+  docker: circleci/docker@2.8.2
   snyk: snyk/snyk@2.3.0
   jfrog: jfrog/artifactory-orb@1.0.1
   sonarcloud: sonarsource/sonarcloud@3.0.0
@@ -257,7 +257,6 @@ jobs:
           at: .
       
       - setup_remote_docker:
-          version: 20.10.14
           docker_layer_caching: true
       
       - run:
@@ -445,7 +444,6 @@ jobs:
           at: .
       
       - setup_remote_docker:
-          version: 20.10.14
           docker_layer_caching: true
       
       - jfrog/install
