@@ -176,6 +176,7 @@ jobs:
       
       - sonarcloud/scan:
           sonar_token_variable_name: SONAR_TOKEN
+          cache_version: 1
       
       - run:
           name: Create SonarQube Summary
@@ -303,11 +304,34 @@ jobs:
               echo "- ⏭️ Scan only (feature branch - no push)" >> docker-build-summary.md
             fi
       
-      - snyk/scan:
-          docker-image-name: ${VERSIONED_IMAGE}
-          severity-threshold: high
-          additional-arguments: "--sarif-file-output=snyk-docker.sarif --json-file-output=snyk-docker-results.json --file=./Dotnet.Webapi/Dockerfile"
-          fail-on-issues: false
+      - run:
+          name: Install Snyk CLI for Container Scan
+          command: |
+            # Download and install Snyk CLI manually (no sudo required)
+            curl -Lo /tmp/snyk https://github.com/snyk/cli/releases/latest/download/snyk-linux
+            chmod +x /tmp/snyk
+            echo 'export PATH="/tmp:$PATH"' >> $BASH_ENV
+            
+            # Verify installation
+            /tmp/snyk --version
+      
+      - run:
+          name: Authenticate Snyk
+          command: /tmp/snyk auth $SNYK_TOKEN
+      
+      - run:
+          name: Scan Docker Image with Snyk
+          command: |
+            echo "Scanning Docker image: ${VERSIONED_IMAGE}"
+            
+            # Scan the Docker image
+            /tmp/snyk container test ${VERSIONED_IMAGE} \
+              --severity-threshold=high \
+              --sarif-file-output=snyk-docker.sarif \
+              --json-file-output=snyk-docker-results.json \
+              --file=./Dotnet.Webapi/Dockerfile || true
+            
+            echo "Docker image scan completed"
       
       - run:
           name: Create Docker Security Summary
@@ -561,6 +585,7 @@ workflows:
       
       # Stage 3: Docker build and scan
       - build-and-scan-docker-image:
+          context: dotnet-webapi-security
           requires:
             - build-and-test
             - snyk-security-scan
