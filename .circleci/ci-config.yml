@@ -16,6 +16,7 @@ environment: &default_environment
 # Orbs for extended functionality
 orbs:
   docker: circleci/docker@2.4.0
+  snyk: snyk/snyk@1.7.3
   jfrog: circleci/jfrog@1.6.0
 
 # Executors
@@ -97,19 +98,10 @@ jobs:
           name: Build for Snyk Analysis
           command: dotnet build --configuration Release --no-restore
       
-      - run:
-          name: Install Snyk CLI
-          command: |
-            curl -o snyk-linux https://static.snyk.io/cli/latest/snyk-linux
-            chmod +x snyk-linux
-            sudo mv snyk-linux /usr/local/bin/snyk
-            snyk --version
-      
-      - run:
-          name: Run Snyk Security Scan
-          command: |
-            cd Dotnet.Webapi
-            snyk test --severity-threshold=high --sarif-file-output=../snyk.sarif --json-file-output=../snyk-results.json || true
+      - snyk/scan:
+          severity-threshold: high
+          additional-arguments: "--sarif-file-output=snyk.sarif --json-file-output=snyk-results.json"
+          fail-on-issues: false
       
       - run:
           name: Create Snyk Security Summary
@@ -344,22 +336,11 @@ jobs:
               echo "- ⏭️ Scan only (feature branch - no push)" >> docker-build-summary.md
             fi
       
-      - run:
-          name: Install Snyk CLI
-          command: |
-            curl -o snyk-linux https://static.snyk.io/cli/latest/snyk-linux
-            chmod +x snyk-linux
-            sudo mv snyk-linux /usr/local/bin/snyk
-            snyk --version
-      
-      - run:
-          name: Run Snyk Docker Security Scan
-          command: |
-            snyk container test ${VERSIONED_IMAGE} \
-              --severity-threshold=high \
-              --sarif-file-output=snyk-docker.sarif \
-              --json-file-output=snyk-docker-results.json \
-              --file=./Dotnet.Webapi/Dockerfile || true
+      - snyk/scan:
+          docker-image-name: ${VERSIONED_IMAGE}
+          severity-threshold: high
+          additional-arguments: "--sarif-file-output=snyk-docker.sarif --json-file-output=snyk-docker-results.json --file=./Dotnet.Webapi/Dockerfile"
+          fail-on-issues: false
       
       - run:
           name: Create Docker Security Summary
