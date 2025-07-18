@@ -135,6 +135,7 @@ jobs:
         # Try without organization first (for troubleshooting)
         dotnet sonarscanner begin \
           /k:"${{ env.SONAR_PROJECT_KEY }}" \
+          /o:"${{ env.SONAR_ORGANIZATION }}" \
           /d:sonar.token="${SONAR_TOKEN}" \
           /d:sonar.host.url="https://sonarcloud.io" \
           /d:sonar.cs.dotcover.reportsPaths="**/TestResults/**/coverage.cobertura.xml" \
