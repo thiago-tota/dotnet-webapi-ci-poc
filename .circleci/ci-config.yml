@@ -257,6 +257,7 @@ jobs:
             SHORT_SHA=${CIRCLE_SHA1:0:8}
             
             if [[ "${CIRCLE_BRANCH}" == "main" || "${CIRCLE_BRANCH}" == "master" ]]; then
+              # Main branch: Use date-based versioning + latest
               DATE_TAG=$(date +%Y.%m.%d)
               VERSION_TAG="${DATE_TAG}-${SHORT_SHA}"
               VERSIONED_IMAGE="${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}"
@@ -266,14 +267,16 @@ jobs:
               echo "export BUILD_LATEST='true'" >> $BASH_ENV
               echo "export DOCKER_TAGS='${VERSION_TAG},latest'" >> $BASH_ENV
             elif [[ "${CIRCLE_BRANCH}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              # Release branch: Use semantic version
               VERSION_TAG="${CIRCLE_BRANCH}"
               VERSIONED_IMAGE="${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}"
               echo "export VERSIONED_IMAGE='${VERSIONED_IMAGE}'" >> $BASH_ENV
               echo "export BUILD_LATEST='false'" >> $BASH_ENV
               echo "export DOCKER_TAGS='${VERSION_TAG}'" >> $BASH_ENV
             else
-              SAFE_BRANCH_NAME=$(echo "${CIRCLE_BRANCH}" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
-              VERSION_TAG="${SAFE_BRANCH_NAME}-${SHORT_SHA}-${CIRCLE_BUILD_NUM}"
+              # Feature branch: Use date + commit + run number (like GitHub Actions)
+              DATE_TAG=$(date +%Y.%m.%d)
+              VERSION_TAG="${DATE_TAG}-${SHORT_SHA}"
               VERSIONED_IMAGE="${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}"
               echo "export VERSIONED_IMAGE='${VERSIONED_IMAGE}'" >> $BASH_ENV
               echo "export BUILD_LATEST='false'" >> $BASH_ENV
@@ -394,6 +397,7 @@ jobs:
             SHORT_SHA=${CIRCLE_SHA1:0:8}
             
             if [[ "${CIRCLE_BRANCH}" == "main" || "${CIRCLE_BRANCH}" == "master" ]]; then
+              # Main branch: Use date-based versioning + latest
               DATE_TAG=$(date +%Y.%m.%d)
               VERSION_TAG="${DATE_TAG}-${SHORT_SHA}"
               VERSIONED_IMAGE="${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}"
@@ -403,14 +407,16 @@ jobs:
               echo "export PUSH_LATEST='true'" >> $BASH_ENV
               echo "export DOCKER_TAGS='${VERSION_TAG},latest'" >> $BASH_ENV
             elif [[ "${CIRCLE_BRANCH}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+              # Release branch: Use semantic version
               VERSION_TAG="${CIRCLE_BRANCH}"
               VERSIONED_IMAGE="${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}"
               echo "export VERSIONED_IMAGE='${VERSIONED_IMAGE}'" >> $BASH_ENV
               echo "export PUSH_LATEST='false'" >> $BASH_ENV
               echo "export DOCKER_TAGS='${VERSION_TAG}'" >> $BASH_ENV
             else
-              SAFE_BRANCH_NAME=$(echo "${CIRCLE_BRANCH}" | sed 's/[^a-zA-Z0-9]/-/g' | tr '[:upper:]' '[:lower:]')
-              VERSION_TAG="${SAFE_BRANCH_NAME}-${SHORT_SHA}-${CIRCLE_BUILD_NUM}"
+              # Feature branch: Use date + commit (like GitHub Actions)
+              DATE_TAG=$(date +%Y.%m.%d)
+              VERSION_TAG="${DATE_TAG}-${SHORT_SHA}"
               VERSIONED_IMAGE="${REGISTRY_PATH}/${IMAGE_NAME}:${VERSION_TAG}"
               echo "export VERSIONED_IMAGE='${VERSIONED_IMAGE}'" >> $BASH_ENV
               echo "export PUSH_LATEST='false'" >> $BASH_ENV
