@@ -18,6 +18,7 @@ orbs:
   docker: circleci/docker@2.8.2
   snyk: snyk/snyk@2.3.0
   artifactory: circleci/artifactory@1.0.0
+  artifactory-orb: jfrog/artifactory-orb@1.0.1
   sonarcloud: sonarsource/sonarcloud@3.0.0
 
 # Executors
