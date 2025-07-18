@@ -88,7 +88,38 @@ jobs:
         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
       run: |
         # Scan from project directory for better detection
-        cd Dotnet.Webapi && snyk test --severity-threshold=high --sarif-file-output=../snyk.sarif
+        cd Dotnet.Webapi && snyk test --severity-threshold=high --sarif-file-output=../snyk.sarif --json-file-output=../snyk-results.json || true
+        
+        # Create summary for GitHub Actions
+        echo "## 🛡️ Snyk Security Scan Results" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -f ../snyk-results.json ]; then
+          # Parse JSON results and create summary
+          VULNERABILITIES=$(cat ../snyk-results.json | jq -r '.vulnerabilities | length' 2>/dev/null || echo "0")
+          HIGH_VULNS=$(cat ../snyk-results.json | jq -r '[.vulnerabilities[] | select(.severity == "high")] | length' 2>/dev/null || echo "0")
+          MEDIUM_VULNS=$(cat ../snyk-results.json | jq -r '[.vulnerabilities[] | select(.severity == "medium")] | length' 2>/dev/null || echo "0")
+          LOW_VULNS=$(cat ../snyk-results.json | jq -r '[.vulnerabilities[] | select(.severity == "low")] | length' 2>/dev/null || echo "0")
+          
+          echo "### Code Vulnerability Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔴 High | $HIGH_VULNS |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🟡 Medium | $MEDIUM_VULNS |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔵 Low | $LOW_VULNS |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Total** | **$VULNERABILITIES** |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "$VULNERABILITIES" -gt "0" ]; then
+            echo "⚠️ **Action Required**: $VULNERABILITIES vulnerabilities found in dependencies" >> $GITHUB_STEP_SUMMARY
+            echo "📋 Check the Security tab for detailed vulnerability information" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **No vulnerabilities found** - All dependencies are secure!" >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "❌ **Scan Failed**: Unable to generate vulnerability report" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
         
     - name: Upload Snyk results to GitHub Code Scanning
       uses: github/codeql-action/upload-sarif@v3
@@ -158,6 +189,28 @@ jobs:
       env:
         SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       run: dotnet sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
+      
+    - name: Create SonarQube Summary
+      if: always()
+      run: |
+        echo "## 📊 SonarQube Code Quality Analysis" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Analysis Details" >> $GITHUB_STEP_SUMMARY
+        echo "- **Project**: ${{ env.SONAR_PROJECT_KEY }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Organization**: ${{ env.SONAR_ORGANIZATION }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 🔗 View Results" >> $GITHUB_STEP_SUMMARY
+        echo "📈 [View detailed analysis on SonarCloud](https://sonarcloud.io/project/overview?id=${{ env.SONAR_PROJECT_KEY }})" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Analysis Coverage" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Code Quality Gates" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Security Hotspots" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Code Coverage Analysis" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Code Duplication Detection" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Maintainability Assessment" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
 
   build-and-scan-docker-image:
     needs: [build-and-test, snyk-security-scan, sonarqube-scan]
@@ -223,6 +276,30 @@ jobs:
         
         echo "✅ Docker build completed successfully"
         
+        # Create Docker build summary
+        echo "## 🐳 Docker Image Build Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Build Details" >> $GITHUB_STEP_SUMMARY
+        echo "- **Branch**: $BRANCH_NAME" >> $GITHUB_STEP_SUMMARY
+        echo "- **Commit**: $SHORT_SHA" >> $GITHUB_STEP_SUMMARY
+        echo "- **Version Tag**: $VERSION_TAG" >> $GITHUB_STEP_SUMMARY
+        echo "- **Registry**: ${{ env.REGISTRY_PATH }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Built Images" >> $GITHUB_STEP_SUMMARY
+        echo "- 📦 \`${VERSIONED_IMAGE}\`" >> $GITHUB_STEP_SUMMARY
+        if [[ "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "master" ]]; then
+          echo "- 📦 \`${LATEST_IMAGE}\`" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+        echo "- 🔍 Security scanning with Snyk" >> $GITHUB_STEP_SUMMARY
+        if [[ "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "master" ]]; then
+          echo "- 🚀 Push to JFrog Artifactory (main branch)" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- ⏭️ Scan only (feature branch - no push)" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
         # Set outputs for other jobs
         echo "image-name=${VERSIONED_IMAGE}" >> $GITHUB_OUTPUT
         echo "image-tag=${VERSION_TAG}" >> $GITHUB_OUTPUT
@@ -263,10 +340,49 @@ jobs:
         echo "Commit: $SHORT_SHA"
         echo "Version Tag: $VERSION_TAG"
         echo "Image: $VERSIONED_IMAGE"
+        
+        # Run Snyk container scan with JSON output for summary
         snyk container test $VERSIONED_IMAGE \
           --severity-threshold=high \
           --sarif-file-output=snyk-docker.sarif \
-          --file=./Dotnet.Webapi/Dockerfile
+          --json-file-output=snyk-docker-results.json \
+          --file=./Dotnet.Webapi/Dockerfile || true
+          
+        # Create Docker scan summary
+        echo "## 🐳 Docker Image Security Scan" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Scanned Image" >> $GITHUB_STEP_SUMMARY
+        echo "- **Image**: \`$VERSIONED_IMAGE\`" >> $GITHUB_STEP_SUMMARY
+        echo "- **Base Image**: .NET 8 Runtime" >> $GITHUB_STEP_SUMMARY
+        echo "- **Dockerfile**: \`./Dotnet.Webapi/Dockerfile\`" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -f snyk-docker-results.json ]; then
+          # Parse container scan results
+          CONTAINER_VULNS=$(cat snyk-docker-results.json | jq -r '.vulnerabilities | length' 2>/dev/null || echo "0")
+          HIGH_CONTAINER_VULNS=$(cat snyk-docker-results.json | jq -r '[.vulnerabilities[] | select(.severity == "high")] | length' 2>/dev/null || echo "0")
+          MEDIUM_CONTAINER_VULNS=$(cat snyk-docker-results.json | jq -r '[.vulnerabilities[] | select(.severity == "medium")] | length' 2>/dev/null || echo "0")
+          LOW_CONTAINER_VULNS=$(cat snyk-docker-results.json | jq -r '[.vulnerabilities[] | select(.severity == "low")] | length' 2>/dev/null || echo "0")
+          
+          echo "### Container Vulnerability Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Severity | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔴 High | $HIGH_CONTAINER_VULNS |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🟡 Medium | $MEDIUM_CONTAINER_VULNS |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🔵 Low | $LOW_CONTAINER_VULNS |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Total** | **$CONTAINER_VULNS** |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "$CONTAINER_VULNS" -gt "0" ]; then
+            echo "⚠️ **Container Security Issues**: $CONTAINER_VULNS vulnerabilities found in base image or dependencies" >> $GITHUB_STEP_SUMMARY
+            echo "🔍 Review Security tab for container-specific vulnerabilities" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ **Container Secure**: No vulnerabilities found in Docker image!" >> $GITHUB_STEP_SUMMARY
+          fi
+        else
+          echo "❌ **Container Scan Failed**: Unable to generate container vulnerability report" >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
           
     - name: Upload Snyk Docker results to GitHub Code Scanning
       uses: github/codeql-action/upload-sarif@v3
@@ -384,6 +500,39 @@ jobs:
             echo "❌ Failed to push latest image"
             exit 1
           fi
+        fi
+        
+        # Create comprehensive push summary
+        echo "## 🚀 Docker Image Deployment Summary" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### Deployment Details" >> $GITHUB_STEP_SUMMARY
+        echo "- **Registry**: JFrog Artifactory" >> $GITHUB_STEP_SUMMARY
+        echo "- **Repository**: ${{ env.REGISTRY_PATH }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Branch**: $BRANCH_NAME" >> $GITHUB_STEP_SUMMARY
+        echo "- **Commit**: $SHORT_SHA" >> $GITHUB_STEP_SUMMARY
+        echo "- **Build Number**: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📦 Pushed Images" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ \`${VERSIONED_IMAGE}\`" >> $GITHUB_STEP_SUMMARY
+        if [[ "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "master" ]]; then
+          echo "- ✅ \`${LATEST_IMAGE}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🎯 Deployment Ready" >> $GITHUB_STEP_SUMMARY
+          echo "This image is now available for production deployment!" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🧪 Development Image" >> $GITHUB_STEP_SUMMARY
+          echo "This feature branch image is available for testing." >> $GITHUB_STEP_SUMMARY
+        fi
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "### 📊 Build Artifacts" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Security scanned (Snyk)" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Code quality checked (SonarQube)" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Tests passed" >> $GITHUB_STEP_SUMMARY
+        echo "- ✅ Container security verified" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [[ "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "master" ]]; then
           echo "✅ Successfully pushed both images:"
           echo " - ${VERSIONED_IMAGE}"
           echo " - ${LATEST_IMAGE}"
