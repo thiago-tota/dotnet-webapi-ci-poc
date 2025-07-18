@@ -16,8 +16,9 @@ environment: &default_environment
 # Orbs for extended functionality
 orbs:
   docker: circleci/docker@2.4.0
-  snyk: snyk/snyk@1.7.3
-  jfrog: circleci/jfrog@1.6.0
+  snyk: snyk/snyk@2.3.0
+  jfrog: jfrog/artifactory-orb@1.0.1
+  sonarcloud: sonarsource/sonarcloud@3.0.0
 
 # Executors
 executors:
@@ -158,38 +159,8 @@ jobs:
           at: .
       
       - run:
-          name: Install Java (required for SonarQube Scanner)
-          command: |
-            apt-get update
-            apt-get install -y openjdk-17-jdk
-            export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-      
-      - run:
-          name: Install SonarQube Scanner for .NET
-          command: dotnet tool install --global dotnet-sonarscanner
-      
-      - run:
-          name: Add .NET tools to PATH
-          command: echo 'export PATH="$PATH:/root/.dotnet/tools"' >> $BASH_ENV
-      
-      - run:
           name: Restore Dependencies
           command: dotnet restore
-      
-      - run:
-          name: Begin SonarQube Analysis
-          command: |
-            export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-            export PATH="$PATH:/root/.dotnet/tools"
-            
-            dotnet sonarscanner begin \
-              /k:"${SONAR_PROJECT_KEY}" \
-              /o:"${SONAR_ORGANIZATION}" \
-              /d:sonar.token="${SONAR_TOKEN}" \
-              /d:sonar.host.url="https://sonarcloud.io" \
-              /d:sonar.cs.dotcover.reportsPaths="**/TestResults/**/coverage.cobertura.xml" \
-              /d:sonar.cs.vstest.reportsPaths="**/TestResults/*.trx" \
-              /d:sonar.scanner.skipJreProvisioning=true
       
       - run:
           name: Build and Test with Coverage
@@ -203,12 +174,8 @@ jobs:
               --collect:"XPlat Code Coverage" \
               --settings coverlet.runsettings
       
-      - run:
-          name: End SonarQube Analysis
-          command: |
-            export JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
-            export PATH="$PATH:/root/.dotnet/tools"
-            dotnet sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
+      - sonarcloud/scan:
+          sonar_token_variable_name: SONAR_TOKEN
       
       - run:
           name: Create SonarQube Summary
@@ -422,7 +389,7 @@ jobs:
           command: |
             # Configure JFrog CLI with OIDC or access token
             if [ -n "${JF_ACCESS_TOKEN}" ]; then
-              jfrog rt config --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}"
+              jf config add --url="${JF_URL}" --access-token="${JF_ACCESS_TOKEN}" --interactive=false
             else
               echo "Using OIDC authentication with JFrog"
               # OIDC configuration would go here
@@ -432,7 +399,7 @@ jobs:
           name: Verify JFrog Connection
           command: |
             echo "Testing JFrog connection..."
-            jfrog rt ping
+            jf rt ping
       
       - run:
           name: Generate Docker Image Tags for Push
@@ -498,7 +465,7 @@ jobs:
             echo "Version Tag: ${VERSION_TAG}"
             echo "Image: ${VERSIONED_IMAGE}"
             
-            if ! jfrog rt docker-push ${VERSIONED_IMAGE}; then
+            if ! jf docker push ${VERSIONED_IMAGE}; then
               echo "❌ Failed to push versioned image"
               exit 1
             fi
@@ -506,7 +473,7 @@ jobs:
             # Push latest tag for main branch
             if [[ "${PUSH_LATEST}" == "true" ]]; then
               echo "Pushing latest tag..."
-              if ! jfrog rt docker-push ${LATEST_IMAGE}; then
+              if ! jf docker push ${LATEST_IMAGE}; then
                 echo "❌ Failed to push latest image"
                 exit 1
               fi
@@ -547,11 +514,11 @@ jobs:
           name: Publish Build Info to JFrog
           command: |
             # Collect environment variables for the build
-            jfrog rt build-collect-env
+            jf rt build-collect-env
             # Collect VCS details from git and add them to the build
-            jfrog rt build-add-git
+            jf rt build-add-git
             # Publish build info
-            jfrog rt build-publish
+            jf rt build-publish
           environment:
             JFROG_CLI_BUILD_NAME: dotnet-webapi
             JFROG_CLI_BUILD_NUMBER: ${CIRCLE_BUILD_NUM}
@@ -585,6 +552,7 @@ workflows:
               only: /.*/
       
       - sonarqube-scan:
+          context: dotnet-webapi-security
           requires:
             - build-and-test
           filters:
@@ -603,6 +571,7 @@ workflows:
       
       # Stage 4: Deploy to registry (main/master only)
       - push-docker-image-jfrog:
+          context: dotnet-webapi-security
           requires:
             - build-and-scan-docker-image
           filters:
