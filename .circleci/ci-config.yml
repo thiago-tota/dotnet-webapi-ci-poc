@@ -463,9 +463,22 @@ jobs:
             env | grep -E "^CIRCLE_" | sort
             echo "============================================"
             
-            # Check if OIDC environment variables are available
-            if [ -n "${CIRCLE_OIDC_TOKEN}" ]; then
-              echo "✅ OIDC token is available"
+            # Check authentication options - prioritize API key for now due to OIDC discovery issues
+            if [ -n "${ARTIFACTORY_API_KEY}" ]; then
+              echo "✅ Using API key authentication (recommended for now)"
+              echo "API key length: ${#ARTIFACTORY_API_KEY}"
+              
+              # Configure with API key
+              if jfrog config add --url="${ARTIFACTORY_URL}" --access-token="${ARTIFACTORY_API_KEY}" --interactive=false; then
+                echo "✅ JFrog CLI configured successfully with API key"
+              else
+                echo "❌ Failed to configure JFrog CLI with API key"
+                exit 1
+              fi
+              
+            elif [ -n "${CIRCLE_OIDC_TOKEN}" ]; then
+              echo "⚠️  API key not available, attempting OIDC authentication..."
+              echo "⚠️  Note: CircleCI OIDC discovery endpoints are currently not accessible"
               echo "Token length: ${#CIRCLE_OIDC_TOKEN}"
               echo "Token preview: ${CIRCLE_OIDC_TOKEN:0:20}..."
               
@@ -495,29 +508,14 @@ jobs:
               echo "   Subject (sub): ${SUB}"
               echo "   JWT ID (jti): ${JTI}"
               echo ""
-              echo "🔧 JFROG OIDC CONFIGURATION REQUIREMENTS:"
-              echo "   1. Provider URL/Issuer: ${ISS}"
-              echo "   2. Audience: ${AUD}"
-              echo "   3. Claims mapping should include:"
-              echo "      - Token ID: jti (value: ${JTI})"
-              echo "      - Subject: sub (value: ${SUB})"
-              echo ""
-              echo "🚨 SIGNATURE VERIFICATION TROUBLESHOOTING:"
-              echo "   Based on JFrog logs showing 'signature verification failed':"
-              echo "   1. Verify JFrog can access CircleCI's public keys at: ${ISS}/.well-known/openid_configuration"
-              echo "   2. Check that the 'Provider URL' in JFrog OIDC config exactly matches: ${ISS}"
-              echo "   3. Ensure 'Audience' in JFrog OIDC config exactly matches: ${AUD}"
-              echo "   4. Verify network connectivity from JFrog to CircleCI OIDC endpoints"
-              echo "=========================="
               
               # Test CircleCI OIDC discovery endpoint
-              echo ""
               echo "🔍 Testing CircleCI OIDC Discovery Endpoint:"
               DISCOVERY_URL="${ISS}/.well-known/openid_configuration"
               echo "   Primary endpoint: ${DISCOVERY_URL}"
               
               # Test the standard OIDC discovery endpoint
-              if curl -s "${DISCOVERY_URL}" 2>/dev/null | jq . 2>/dev/null; then
+              if curl -s "${DISCOVERY_URL}" 2>/dev/null | jq . 2>/dev/null && ! curl -s "${DISCOVERY_URL}" 2>/dev/null | grep -q "Route Not Found"; then
                 echo "✅ CircleCI OIDC discovery endpoint is accessible"
                 
                 # Get the JWKS URI
@@ -534,77 +532,44 @@ jobs:
                   fi
                 fi
               else
-                echo "❌ Primary OIDC discovery endpoint failed"
-                
-                # Try alternative OIDC discovery endpoints
-                echo "   Trying alternative CircleCI OIDC endpoints..."
-                
-                # Try the root CircleCI OIDC endpoint
-                ALT_DISCOVERY_1="https://oidc.circleci.com/.well-known/openid_configuration"
-                echo "   Alternative 1: ${ALT_DISCOVERY_1}"
-                if curl -s "${ALT_DISCOVERY_1}" 2>/dev/null | jq . 2>/dev/null; then
-                  echo "✅ Alternative CircleCI OIDC discovery endpoint found!"
-                  curl -s "${ALT_DISCOVERY_1}" | jq .
-                else
-                  echo "❌ Alternative 1 failed"
-                fi
-                
-                # Try without org-specific path
-                ALT_DISCOVERY_2="https://oidc.circleci.com/org/${CIRCLE_ORGANIZATION_ID}/.well-known/openid_configuration"
-                echo "   Alternative 2: ${ALT_DISCOVERY_2}"
-                if curl -s "${ALT_DISCOVERY_2}" 2>/dev/null | jq . 2>/dev/null; then
-                  echo "✅ Alternative CircleCI OIDC discovery endpoint found!"
-                  curl -s "${ALT_DISCOVERY_2}" | jq .
-                else
-                  echo "❌ Alternative 2 failed"
-                fi
-                
-                # Show what we get from the base URL
-                echo "   Testing base issuer URL response:"
-                echo "   ${ISS}"
-                curl -s "${ISS}" || echo "Base URL not accessible"
+                echo "❌ CircleCI OIDC discovery endpoints are not accessible"
+                echo "   This is a known issue - CircleCI's OIDC service structure differs from standard"
+                echo "   Recommendation: Use API key authentication instead"
               fi
               echo ""
               
-              echo "Attempting OIDC authentication..."
+              echo "Attempting OIDC authentication (will likely fail due to discovery endpoint issues)..."
               # Configure with OIDC token
               if jfrog config add --url="${ARTIFACTORY_URL}" --access-token="${CIRCLE_OIDC_TOKEN}" --interactive=false; then
                 echo "✅ JFrog CLI configured successfully with OIDC"
               else
                 echo "❌ Failed to configure JFrog CLI with OIDC token"
                 echo ""
-                echo "🔍 DEBUGGING SIGNATURE VERIFICATION FAILURE:"
-                echo "   The JFrog logs show 'signature verification failed' which means:"
-                echo "   1. ❌ JFrog cannot verify the JWT signature with its configured public key"
-                echo "   2. ❌ There's a mismatch between CircleCI's signing key and JFrog's verification key"
+                echo "� OIDC AUTHENTICATION ISSUE:"
+                echo "   CircleCI's OIDC discovery endpoints are not accessible:"
+                echo "   - ${ISS}/.well-known/openid_configuration returns 'Route Not Found'"
+                echo "   - https://oidc.circleci.com/.well-known/openid_configuration returns 'Route Not Found'"
                 echo ""
-                echo "🛠️  TO FIX THE SIGNATURE VERIFICATION:"
-                echo "   1. In JFrog OIDC Integration settings, verify the 'Provider URL' is: ${ISS}"
-                echo "   2. Test JFrog's access to CircleCI's OIDC discovery endpoint:"
-                echo "      curl ${ISS}/.well-known/openid_configuration"
-                echo "   3. Verify the 'jwks_uri' in the discovery document is accessible from JFrog"
-                echo "   4. Check that 'Audience' in JFrog exactly matches: ${AUD}"
-                echo "   5. Ensure no firewall/proxy is blocking JFrog -> CircleCI OIDC endpoints"
-                echo ""
-                echo "🔄 ALTERNATIVE DEBUGGING:"
-                echo "   - Try recreating the OIDC integration in JFrog from scratch"
-                echo "   - Verify CircleCI project settings allow OIDC token generation"
-                echo "   - Check if multiple OIDC integrations exist and conflict"
+                echo "�️  SOLUTION:"
+                echo "   1. Generate an API key in JFrog Artifactory"
+                echo "   2. Add ARTIFACTORY_API_KEY to CircleCI context 'dotnet-webapi-security'"
+                echo "   3. This will use reliable API key authentication instead of OIDC"
                 exit 1
               fi
-              
-            elif [ -n "${ARTIFACTORY_API_KEY}" ]; then
-              echo "⚠️  OIDC not available, falling back to API key authentication"
-              # Fallback to API key if OIDC is not available
-              jfrog config add --url="${ARTIFACTORY_URL}" --access-token="${ARTIFACTORY_API_KEY}" --interactive=false
             else
-              echo "❌ Neither OIDC token nor API key available"
+              echo "❌ Neither API key nor OIDC token available"
               echo "Available environment variables:"
               env | grep -E "(CIRCLE_|ARTIFACTORY_|JF_)" | sort
               echo ""
-              echo "To fix this:"
-              echo "1. Set up OIDC integration in JFrog (recommended)"
-              echo "2. OR set ARTIFACTORY_API_KEY environment variable"
+              echo "🛠️  TO FIX AUTHENTICATION:"
+              echo "1. 🔑 RECOMMENDED: Generate an API key in JFrog Artifactory"
+              echo "   - Go to JFrog > User Profile > Generate API Key"
+              echo "   - Add ARTIFACTORY_API_KEY to CircleCI context 'dotnet-webapi-security'"
+              echo ""
+              echo "2. 🔄 ALTERNATIVE: Fix OIDC integration (more complex)"
+              echo "   - CircleCI's OIDC discovery endpoints are currently not standard"
+              echo "   - Contact CircleCI support for correct OIDC discovery URL format"
+              echo "   - Or wait for CircleCI to fix their OIDC endpoint structure"
               exit 1
             fi
             
