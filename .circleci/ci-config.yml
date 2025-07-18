@@ -176,11 +176,6 @@ jobs:
               --collect:"XPlat Code Coverage" \
               --settings coverlet.runsettings
 
-      # Use SonarCloud orb with correct parameters
-      - sonarcloud/scan:
-          sonar_token_variable_name: SONAR_TOKEN
-          cache_version: 1
-
       - run:
           name: Create SonarCloud Configuration  
           command: |
@@ -198,6 +193,11 @@ jobs:
               echo "sonar.pullrequest.base=main" >> sonar-project.properties
             fi
             cat sonar-project.properties
+
+      # Use SonarCloud orb with correct parameters
+      - sonarcloud/scan:
+          sonar_token_variable_name: SONAR_TOKEN
+          cache_version: 1
 
       - run:
           name: Create SonarQube Summary
@@ -290,15 +290,25 @@ jobs:
             --label org.opencontainers.image.created=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
             --label org.opencontainers.image.version=${VERSION_TAG}
 
-      # Use Snyk orb for container scanning
-      - snyk/scan:
-          command: container test
-          target-file: ./Dotnet.Webapi/Dockerfile
-          docker-image-name: $VERSIONED_IMAGE
-          fail-on-issues: false
-          severity-threshold: high
-          token-variable: SNYK_TOKEN
-          additional-arguments: "--sarif-file-output=snyk-docker.sarif --json-file-output=snyk-docker-results.json"
+      # Manual Snyk container scan (orb doesn't work well in Docker executor)
+      - run:
+          name: Install and Run Snyk Container Scan
+          command: |
+            # Install Snyk CLI
+            curl -o snyk-linux https://github.com/snyk/snyk/releases/download/v1.1298.0/snyk-linux
+            chmod +x snyk-linux
+            
+            # Authenticate with Snyk
+            ./snyk-linux auth $SNYK_TOKEN
+            
+            # Run container scan
+            ./snyk-linux container test ${VERSIONED_IMAGE} \
+              --file=./Dotnet.Webapi/Dockerfile \
+              --severity-threshold=high \
+              --sarif-file-output=snyk-docker.sarif \
+              --json-file-output=snyk-docker-results.json || true
+            
+            echo "✅ Snyk container scan completed"
       
       - run:
           name: Create Docker Security Summary
